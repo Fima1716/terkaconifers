@@ -4,7 +4,7 @@ import { useAuthStore } from '~/stores/auth'
 // ── Types ──────────────────────────────────
 interface BEl {
   id: string
-  type: 'heading' | 'subheading' | 'button' | 'image'
+  type: 'heading' | 'subheading' | 'button' | 'image' | 'shape'
   x: number   // % of canvas width
   y: number   // px from top
   content: string  // text content, or image filename/URL for type=image
@@ -15,8 +15,10 @@ interface BEl {
   letterSpacing: number
   zIndex: number
   shadow?: boolean  // text shadow (default false)
-  width?: number    // image width in px (for type=image)
-  height?: number   // image height in px (for type=image, undefined = auto)
+  width?: number    // image/shape width in px
+  height?: number   // image/shape height in px (undefined = auto for images)
+  opacity?: number  // shape opacity 0-1
+  borderRadius?: number // shape border radius
 }
 
 interface Slide {
@@ -162,6 +164,16 @@ const editorScale = computed(() => {
   return Math.min(1, Math.max(0.4, natural))
 })
 
+// Fabric control style constants
+const FABRIC_CTRL = {
+  cornerColor: '#4A90D9',
+  cornerStrokeColor: '#fff',
+  cornerSize: 8,
+  transparentCorners: false,
+  borderColor: '#4A90D9',
+  borderDashArray: [4, 4],
+}
+
 // ── Fabric.js ──────────────────────────────
 const fabricCanvasRef = ref<HTMLCanvasElement>()
 let fabricCanvas: InstanceType<typeof import('fabric').Canvas> | null = null
@@ -187,6 +199,8 @@ async function initFabricCanvas() {
   const fabric = await ensureFabricModule()
   disposeFabric()
 
+  // Wait for Teleport to mount
+  await nextTick()
   await nextTick()
   const el = fabricCanvasRef.value
   if (!el || !editConfig.value) return
@@ -231,6 +245,12 @@ function onFabricModified(e: any) {
     el.y = obj.top
     el.width = Math.round(obj.getScaledWidth())
     el.height = Math.round(obj.getScaledHeight())
+  } else if (el.type === 'shape') {
+    el.x = (obj.left / dw) * 100
+    el.y = obj.top
+    el.width = Math.round(obj.getScaledWidth())
+    el.height = Math.round(obj.getScaledHeight())
+    obj.set({ width: el.width, height: el.height, scaleX: 1, scaleY: 1 })
   } else if (el.type === 'button') {
     // Button is a group
     el.x = (obj.left / dw) * 100
@@ -306,7 +326,6 @@ async function renderSlideToCanvas() {
           selectable: false, evented: false,
         })
         fabricCanvas.add(overlay)
-        // Keep overlay behind elements but in front of bg image
       }
     } catch {
       fabricCanvas.backgroundColor = '#333'
@@ -320,7 +339,20 @@ async function renderSlideToCanvas() {
     const left = (el.x / 100) * dw
     const top = el.y
 
-    if (el.type === 'image' && el.content) {
+    if (el.type === 'shape') {
+      const rect = new fabric.Rect({
+        left, top,
+        width: el.width || 200,
+        height: el.height || 100,
+        fill: el.color || '#ffffff',
+        opacity: el.opacity ?? 0.5,
+        rx: el.borderRadius || 0,
+        ry: el.borderRadius || 0,
+        data: { belId: el.id, belType: el.type },
+        ...FABRIC_CTRL,
+      })
+      fabricCanvas.add(rect)
+    } else if (el.type === 'image' && el.content) {
       const src = el.content.startsWith('data:') || el.content.startsWith('http') ? el.content : imgUrl(el.content)
       try {
         const img = await fabric.FabricImage.fromURL(src, { crossOrigin: 'anonymous' })
@@ -332,11 +364,7 @@ async function renderSlideToCanvas() {
         img.set({
           left, top,
           data: { belId: el.id, belType: el.type },
-          cornerColor: '#ff6d00',
-          cornerStrokeColor: '#fff',
-          cornerSize: 10,
-          transparentCorners: false,
-          borderColor: '#ff6d00',
+          ...FABRIC_CTRL,
         })
         fabricCanvas.add(img)
       } catch {
@@ -367,12 +395,8 @@ async function renderSlideToCanvas() {
       const group = new fabric.Group([bgRect, textObj], {
         left, top,
         data: { belId: el.id, belType: el.type },
-        cornerColor: '#ff6d00',
-        cornerStrokeColor: '#fff',
-        cornerSize: 10,
-        transparentCorners: false,
-        borderColor: '#ff6d00',
         subTargetCheck: true,
+        ...FABRIC_CTRL,
       })
       if (el.shadow) {
         group.shadow = new fabric.Shadow({ color: 'rgba(0,0,0,0.3)', blur: 10, offsetX: 0, offsetY: 2 })
@@ -391,11 +415,7 @@ async function renderSlideToCanvas() {
         editable: true,
         splitByGrapheme: false,
         data: { belId: el.id, belType: el.type },
-        cornerColor: '#ff6d00',
-        cornerStrokeColor: '#fff',
-        cornerSize: 10,
-        transparentCorners: false,
-        borderColor: '#ff6d00',
+        ...FABRIC_CTRL,
       })
       if (el.shadow) {
         tb.shadow = new fabric.Shadow({ color: 'rgba(0,0,0,0.3)', blur: 10, offsetX: 0, offsetY: 2 })
@@ -416,7 +436,17 @@ function syncElToFabric(el: BEl) {
   const dw = editConfig.value!.designWidth
   obj.set({ left: (el.x / 100) * dw, top: el.y })
 
-  if (el.type === 'image') {
+  if (el.type === 'shape') {
+    obj.set({
+      fill: el.color,
+      opacity: el.opacity ?? 0.5,
+      rx: el.borderRadius || 0,
+      ry: el.borderRadius || 0,
+      width: el.width || 200,
+      height: el.height || 100,
+    } as any)
+    obj.setCoords()
+  } else if (el.type === 'image') {
     if ('scaleToWidth' in obj) {
       (obj as any).scaleToWidth(el.width || 200)
       if (el.height) (obj as any).scaleToHeight(el.height)
@@ -480,16 +510,16 @@ async function startEdit() {
   } catch { mobileConfig.value = null }
   selectedId.value = ''; editMode.value = true; stopAutoplay(); current.value = 0
   window.addEventListener('keydown', onKey)
-  nextTick(() => {
-    if (canvasAreaRef.value) {
-      canvasAreaWidth.value = canvasAreaRef.value.clientWidth
-      canvasAreaObs = new ResizeObserver(() => { canvasAreaWidth.value = canvasAreaRef.value!.clientWidth })
-      canvasAreaObs.observe(canvasAreaRef.value)
-    }
-  })
-  // Init fabric after DOM updates
+  // Init fabric after Teleport mounts
   await nextTick()
   await nextTick()
+  if (canvasAreaRef.value) {
+    canvasAreaWidth.value = canvasAreaRef.value.clientWidth
+    canvasAreaObs = new ResizeObserver(() => {
+      if (canvasAreaRef.value) canvasAreaWidth.value = canvasAreaRef.value.clientWidth
+    })
+    canvasAreaObs.observe(canvasAreaRef.value)
+  }
   await initFabricCanvas()
 }
 
@@ -581,6 +611,9 @@ function syncFabricToAllEls() {
     if (el.type === 'image') {
       el.width = Math.round(obj.getScaledWidth())
       el.height = Math.round(obj.getScaledHeight())
+    } else if (el.type === 'shape') {
+      el.width = Math.round(obj.getScaledWidth())
+      el.height = Math.round(obj.getScaledHeight())
     } else if (el.type === 'button') {
       // group - just position
     } else {
@@ -629,9 +662,29 @@ function deleteCurrentSlide() {
 
 function onKey(e: KeyboardEvent) {
   if (!editMode.value) return
+  // Ctrl+S to save
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault()
+    saveEdit()
+    return
+  }
+  // Ctrl+D to duplicate
+  if ((e.ctrlKey || e.metaKey) && e.key === 'd' && selectedId.value) {
+    e.preventDefault()
+    duplicateSelected()
+    return
+  }
   if (e.key === 'Escape') {
-    if (fabricCanvas) fabricCanvas.discardActiveObject()
+    if (fabricCanvas) {
+      const ao = fabricCanvas.getActiveObject()
+      if (ao && (ao as any).isEditing) {
+        ;(ao as any).exitEditing()
+        return
+      }
+      fabricCanvas.discardActiveObject()
+    }
     selectedId.value = ''
+    return
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId.value) {
     // Avoid deleting when editing text inside fabric
@@ -640,18 +693,26 @@ function onKey(e: KeyboardEvent) {
       if (ao && (ao as any).isEditing) return
     }
     if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'SELECT') return
-    const els = editSlide.value?.elements
-    if (els) {
-      const idx = els.findIndex(el => el.id === selectedId.value)
-      if (idx >= 0) {
-        els.splice(idx, 1)
-        selectedId.value = ''
-        if (fabricCanvas) {
-          fabricCanvas.discardActiveObject()
-        }
-        nextTick(() => renderSlideToCanvas())
-      }
+    deleteSelectedEl()
+    return
+  }
+  // Arrow keys nudge selected element
+  if (selectedId.value && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return
+    if (fabricCanvas) {
+      const ao = fabricCanvas.getActiveObject()
+      if (ao && (ao as any).isEditing) return
     }
+    e.preventDefault()
+    const el = selectedEl.value
+    if (!el || !editConfig.value) return
+    const step = e.shiftKey ? 10 : 1
+    const dw = editConfig.value.designWidth
+    if (e.key === 'ArrowUp') el.y -= step
+    if (e.key === 'ArrowDown') el.y += step
+    if (e.key === 'ArrowLeft') el.x -= (step / dw) * 100
+    if (e.key === 'ArrowRight') el.x += (step / dw) * 100
+    syncElToFabric(el)
   }
 }
 
@@ -659,15 +720,20 @@ function onKey(e: KeyboardEvent) {
 function addElement(type: BEl['type']) {
   if (!editSlide.value) return
   const h = editConfig.value!.canvasHeight
+  const dw = editConfig.value!.designWidth
   const el: BEl = {
     id: genId(), type, x: 5, y: Math.min(h - 40, 40 + editSlide.value.elements.length * 50),
-    content: type === 'heading' ? 'Заголовок' : type === 'subheading' ? 'Подзаголовок' : type === 'button' ? 'Кнопка' : '',
+    content: type === 'heading' ? 'Заголовок' : type === 'subheading' ? 'Подзаголовок' : type === 'button' ? 'Кнопка' : type === 'shape' ? '' : '',
     link: type === 'button' ? '/catalog' : undefined,
     fontSize: type === 'heading' ? 32 : type === 'subheading' ? 16 : 14,
     fontWeight: type === 'heading' ? 800 : type === 'button' ? 700 : 400,
-    color: type === 'button' ? '#1a5632' : '#ffffff',
+    color: type === 'button' ? '#1a5632' : type === 'shape' ? '#ffffff' : '#ffffff',
     letterSpacing: 0, zIndex: editSlide.value.elements.length + 1,
-    shadow: false, width: type === 'image' ? 200 : undefined,
+    shadow: false,
+    width: type === 'image' ? 200 : type === 'shape' ? 200 : undefined,
+    height: type === 'shape' ? 100 : undefined,
+    opacity: type === 'shape' ? 0.5 : undefined,
+    borderRadius: type === 'shape' ? 0 : undefined,
   }
   editSlide.value.elements.push(el)
   selectedId.value = el.id
@@ -718,6 +784,18 @@ async function onCanvasPaste(e: ClipboardEvent) {
       return
     }
   }
+}
+
+// ── Duplicate selected element ─────────────
+function duplicateSelected() {
+  if (!editSlide.value || !selectedEl.value) return
+  const copy: BEl = JSON.parse(JSON.stringify(selectedEl.value))
+  copy.id = genId()
+  copy.x += 3
+  copy.y += 20
+  editSlide.value.elements.push(copy)
+  selectedId.value = copy.id
+  nextTick(() => renderSlideToCanvas())
 }
 
 // ── Background ─────────────────────────────
@@ -886,8 +964,21 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
                   <div v-if="slide.bgType === 'image' && slide.bgImage" class="slide-overlay" :style="{ opacity: slide.overlay }" />
                 </div>
                 <template v-for="el in slide.elements" :key="el.id">
+                  <div
+                    v-if="el.type === 'shape'"
+                    class="display-el display-shape"
+                    :style="{
+                      left: el.x + '%', top: el.y + 'px',
+                      width: (el.width || 200) + 'px',
+                      height: (el.height || 100) + 'px',
+                      background: el.color,
+                      opacity: el.opacity ?? 0.5,
+                      borderRadius: (el.borderRadius || 0) + 'px',
+                      zIndex: el.zIndex,
+                    }"
+                  />
                   <img
-                    v-if="el.type === 'image' && el.content"
+                    v-else-if="el.type === 'image' && el.content"
                     :src="el.content.startsWith('data:') || el.content.startsWith('http') ? el.content : imgUrl(el.content)"
                     class="display-el display-image"
                     :style="{
@@ -938,189 +1029,91 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
       </div>
     </template>
 
-    <!-- ═══════ EDIT MODE (Fabric.js) ═══════ -->
-    <template v-if="editMode && editConfig">
-      <div class="editor" @paste="onCanvasPaste">
-        <!-- Top bar -->
-        <div class="ed-topbar">
-          <div class="ed-topbar-left">
-            <span class="ed-logo">Banner Editor</span>
-            <div class="ed-variant-toggle">
-              <button :class="['ed-variant-btn', { active: editVariant === 'desktop' }]" @click="switchVariant('desktop')">
+    <!-- ═══════ EDITOR OVERLAY (via Teleport) ═══════ -->
+    <Teleport to="body">
+      <div v-if="editMode && editConfig" class="banner-editor-overlay" @paste="onCanvasPaste">
+        <!-- ── Toolbar ── -->
+        <header class="be-toolbar">
+          <div class="be-toolbar-left">
+            <button class="be-close-btn" @click="cancelEdit" title="Закрыть">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <span class="be-title">Banner Editor</span>
+
+            <!-- Variant toggle -->
+            <div class="be-variant-toggle">
+              <button :class="['be-variant-btn', { active: editVariant === 'desktop' }]" @click="switchVariant('desktop')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                 Desktop
               </button>
-              <button :class="['ed-variant-btn', { active: editVariant === 'mobile' }]" @click="switchVariant('mobile')">
+              <button :class="['be-variant-btn', { active: editVariant === 'mobile' }]" @click="switchVariant('mobile')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
                 Mobile
               </button>
             </div>
-            <button v-if="editVariant === 'mobile'" class="ed-btn ed-btn-sm ed-copy-desktop" @click="copyDesktopToMobile" title="Скопировать десктоп-версию">
+
+            <!-- Copy from desktop -->
+            <button v-if="editVariant === 'mobile'" class="be-btn be-btn-outline be-copy-btn" @click="copyDesktopToMobile" title="Скопировать десктоп-версию">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              Из десктопа
+              Copy&rarr;
             </button>
-            <div class="ed-slides">
-              <button v-for="(_, i) in editConfig.slides" :key="i" :class="['ed-slide-btn', { active: current === i }]" @click="syncFabricToAllEls(); current = i; selectedId = ''">
+
+            <!-- Add buttons -->
+            <div class="be-add-group">
+              <button class="be-btn be-btn-outline" @click="addElement('heading')" title="Добавить заголовок">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 12h8m-4-4v8M20 7v10"/></svg>
+                +Text
+              </button>
+              <button class="be-btn be-btn-outline" @click="addImageFromFile" title="Добавить картинку">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                +Image
+              </button>
+              <button class="be-btn be-btn-outline" @click="addElement('shape')" title="Добавить фигуру">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                +Shape
+              </button>
+            </div>
+
+            <!-- Slides -->
+            <div class="be-slides">
+              <span class="be-slides-label">Slides:</span>
+              <button v-for="(_, i) in editConfig.slides" :key="i" :class="['be-slide-btn', { active: current === i }]" @click="syncFabricToAllEls(); current = i; selectedId = ''">
                 {{ i + 1 }}
               </button>
-              <button class="ed-slide-btn ed-slide-add" @click="addSlide" title="Добавить слайд">+</button>
+              <button class="be-slide-btn be-slide-add" @click="addSlide" title="Добавить слайд">+</button>
+              <button v-if="editConfig.slides.length > 1" class="be-slide-action-btn" @click="deleteCurrentSlide" title="Удалить текущий слайд">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </button>
+              <button class="be-slide-action-btn" @click="duplicateSlide" title="Дублировать слайд">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
             </div>
-            <button v-if="editConfig.slides.length > 1" class="ed-btn ed-btn-sm" @click="deleteCurrentSlide" title="Удалить текущий слайд">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-            </button>
-            <button class="ed-btn ed-btn-sm" @click="duplicateSlide" title="Дублировать слайд">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            </button>
           </div>
-          <div class="ed-topbar-right">
-            <span v-if="saveError" class="ed-save-error">{{ saveError }}</span>
-            <button class="ed-btn ed-btn-ghost" @click="cancelEdit">Отмена</button>
-            <button class="ed-btn ed-btn-primary" :disabled="saving" @click="saveEdit">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
+
+          <div class="be-toolbar-right">
+            <span v-if="saveError" class="be-save-error">{{ saveError }}</span>
+            <button class="be-btn be-btn-ghost" @click="cancelEdit">Cancel</button>
+            <button class="be-btn be-btn-save" :disabled="saving" @click="saveEdit">{{ saving ? 'Saving...' : 'Save' }}</button>
           </div>
-        </div>
+        </header>
 
-        <div class="ed-workspace">
-          <!-- Sidebar -->
-          <aside class="ed-sidebar">
-            <div class="ed-sidebar-section">
-              <div class="ed-sidebar-title">Добавить</div>
-              <button class="ed-add-btn" @click="addElement('heading')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M4 12h8m-4-4v8M20 7v10"/></svg>
-                Заголовок
-              </button>
-              <button class="ed-add-btn" @click="addElement('subheading')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
-                Подзаголовок
-              </button>
-              <button class="ed-add-btn" @click="addElement('button')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="8" width="18" height="8" rx="3"/><path d="M9 12h6"/></svg>
-                Кнопка
-              </button>
-              <button class="ed-add-btn" @click="addImageFromFile">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                Картинка
-              </button>
-              <div class="ed-paste-hint">Ctrl+V — вставить из буфера</div>
-            </div>
-
-            <div class="ed-sidebar-section">
-              <div class="ed-sidebar-title">Фон</div>
-              <select v-if="editSlide" v-model="editSlide.bgType" class="ed-select">
-                <option value="gradient">Градиент</option><option value="color">Цвет</option><option value="image">Картинка</option>
-              </select>
-              <div v-if="editSlide && editSlide.bgType !== 'image'" class="ed-color-row">
-                <input type="color" v-model="editSlide.bgColor1" class="ed-color-pick">
-                <input v-if="editSlide.bgType === 'gradient'" type="color" v-model="editSlide.bgColor2" class="ed-color-pick">
-              </div>
-              <template v-else-if="editSlide">
-                <input type="file" accept="image/*" @change="onBgFile" class="ed-file">
-                <div class="ed-range-row">
-                  <span>Затемнение</span>
-                  <input type="range" min="0" max="80" :value="Math.round(editSlide.overlay * 100)" @input="editSlide.overlay = ($event.target as any).value / 100">
-                  <span class="ed-range-val">{{ Math.round(editSlide.overlay * 100) }}%</span>
-                </div>
-              </template>
-            </div>
-
-            <div v-if="editSlide" class="ed-sidebar-section">
-              <div class="ed-sidebar-title">Ссылка слайда</div>
-              <input type="text" v-model="editSlide.clickLink" class="ed-text-input" placeholder="Весь слайд как ссылка: /catalog или https://...">
-              <div class="ed-hint">Если задано — клик по баннеру ведёт на эту ссылку</div>
-            </div>
-
-            <!-- Selected element properties -->
-            <div v-if="selectedEl" class="ed-sidebar-section">
-              <div class="ed-sidebar-title">{{ selectedEl.type === 'heading' ? 'Заголовок' : selectedEl.type === 'subheading' ? 'Подзаголовок' : selectedEl.type === 'button' ? 'Кнопка' : 'Картинка' }}</div>
-
-              <!-- Image element settings -->
-              <template v-if="selectedEl.type === 'image'">
-                <div class="ed-range-row">
-                  <span>Ширина</span>
-                  <input type="range" :min="30" :max="editConfig!.designWidth" :value="selectedEl.width || 200" @input="updateEl('width', +($event.target as any).value)">
-                  <span class="ed-range-val">{{ selectedEl.width || 200 }}px</span>
-                </div>
-                <div class="ed-range-row">
-                  <span>Высота</span>
-                  <input type="range" :min="30" :max="editConfig!.canvasHeight" :value="selectedEl.height || Math.round((selectedEl.width || 200) * 0.6)" @input="updateEl('height', +($event.target as any).value)">
-                  <span class="ed-range-val">{{ selectedEl.height ? selectedEl.height + 'px' : 'авто' }}</span>
-                </div>
-                <div class="ed-image-actions">
-                  <button class="ed-add-btn" @click="stretchImageToFill(selectedEl)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                    На всю область
-                  </button>
-                  <button v-if="selectedEl.height" class="ed-add-btn" @click="resetImageHeight(selectedEl)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 21H3M21 3H3M12 7v10"/></svg>
-                    Авто-высота
-                  </button>
-                </div>
-              </template>
-
-              <!-- Text element settings -->
-              <template v-else>
-                <div class="ed-range-row">
-                  <span>Размер</span>
-                  <input type="range" :min="10" :max="72" :value="selectedEl.fontSize" @input="updateEl('fontSize', +($event.target as any).value)">
-                  <span class="ed-range-val">{{ selectedEl.fontSize }}</span>
-                </div>
-                <div class="ed-range-row">
-                  <span>Жирность</span>
-                  <select :value="selectedEl.fontWeight" @input="updateEl('fontWeight', +($event.target as any).value)" class="ed-select">
-                    <option :value="300">Light</option><option :value="400">Regular</option><option :value="500">Medium</option>
-                    <option :value="600">Semibold</option><option :value="700">Bold</option><option :value="800">Extra Bold</option>
-                  </select>
-                </div>
-                <div class="ed-range-row">
-                  <span>Цвет</span>
-                  <input type="color" :value="selectedEl.color" @input="updateEl('color', ($event.target as any).value)" class="ed-color-pick">
-                </div>
-                <div class="ed-range-row">
-                  <span>Интервал</span>
-                  <input type="range" min="-2" max="12" :value="selectedEl.letterSpacing" @input="updateEl('letterSpacing', +($event.target as any).value)">
-                  <span class="ed-range-val">{{ selectedEl.letterSpacing }}px</span>
-                </div>
-                <label class="ed-check-row">
-                  <input type="checkbox" :checked="!!selectedEl.shadow" @change="updateEl('shadow', ($event.target as any).checked)">
-                  <span>Тень текста</span>
-                </label>
-              </template>
-
-              <!-- Common settings -->
-              <div class="ed-range-row">
-                <span>Слой</span>
-                <input type="range" min="0" max="10" :value="selectedEl.zIndex" @input="updateEl('zIndex', +($event.target as any).value)">
-                <span class="ed-range-val">{{ selectedEl.zIndex }}</span>
-              </div>
-              <div v-if="selectedEl.type === 'button'" class="ed-range-row">
-                <span>Ссылка</span>
-                <input type="text" :value="selectedEl.link" @input="updateEl('link', ($event.target as any).value)" class="ed-text-input" placeholder="/catalog">
-              </div>
-              <button class="ed-delete-btn" @click="deleteSelectedEl">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                Удалить
-              </button>
-            </div>
-          </aside>
-
+        <!-- ── Workspace ── -->
+        <div class="be-workspace">
           <!-- Canvas area -->
-          <div ref="canvasAreaRef" class="ed-canvas-area">
-            <!-- Device toolbar -->
-            <div class="ed-device-bar">
+          <main ref="canvasAreaRef" class="be-canvas-area">
+            <!-- Device bar / canvas info -->
+            <div class="be-canvas-info">
               <template v-if="editVariant === 'mobile'">
-                <select class="ed-device-select" :value="selectedDevice" @change="applyDevicePreset(+($event.target as any).value)">
+                <select class="be-device-select" :value="selectedDevice" @change="applyDevicePreset(+($event.target as any).value)">
                   <option v-for="(d, i) in DEVICES" :key="i" :value="i">{{ d.name }}</option>
                 </select>
-                <span class="ed-device-dims">{{ editConfig.designWidth }} x {{ editConfig.canvasHeight }}</span>
               </template>
-              <template v-else>
-                <span class="ed-device-dims">Desktop — {{ editConfig.designWidth }} x {{ editConfig.canvasHeight }}</span>
-              </template>
-              <span class="ed-device-zoom">{{ Math.round(editorScale * 100) }}%</span>
+              <span class="be-dims">{{ editVariant === 'desktop' ? 'Desktop' : 'Mobile' }} &mdash; {{ editConfig.designWidth }} &times; {{ Math.round(editConfig.canvasHeight) }}</span>
+              <span class="be-zoom">{{ Math.round(editorScale * 100) }}%</span>
             </div>
 
             <!-- Phone mockup for mobile -->
             <div v-if="editVariant === 'mobile'" class="phone-mockup" :style="{ width: editConfig.designWidth * editorScale + 'px' }">
-              <!-- Fake status bar -->
               <div class="phone-status-bar">
                 <span>9:41</span>
                 <span class="phone-notch-pill" />
@@ -1129,7 +1122,6 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
                   <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><rect x="2" y="6" width="3" height="12" rx="1"/><rect x="7" y="4" width="3" height="14" rx="1"/><rect x="12" y="2" width="3" height="16" rx="1"/><rect x="17" y="0" width="3" height="18" rx="1"/></svg>
                 </span>
               </div>
-              <!-- Fake header -->
               <div class="phone-fake-header">
                 <div class="pfh-back">&#8249;</div>
                 <div class="pfh-logo">&#127794;</div>
@@ -1138,15 +1130,14 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
             </div>
 
             <!-- Fabric Canvas wrapper -->
-            <div
-              class="ed-canvas-scaler"
-              :class="{ 'ed-canvas-mobile-frame': editVariant === 'mobile' }"
+            <div class="be-canvas-wrapper"
+              :class="{ 'be-canvas-mobile-frame': editVariant === 'mobile' }"
               :style="{
                 width: editConfig.designWidth * editorScale + 'px',
                 height: editConfig.canvasHeight * editorScale + 'px',
               }"
             >
-              <div class="ed-fabric-wrap" :style="{ transform: `scale(${editorScale})`, transformOrigin: 'top left', width: editConfig.designWidth + 'px', height: editConfig.canvasHeight + 'px' }">
+              <div class="be-fabric-inner" :style="{ transform: `scale(${editorScale})`, transformOrigin: 'top left', width: editConfig.designWidth + 'px', height: editConfig.canvasHeight + 'px' }">
                 <canvas ref="fabricCanvasRef"></canvas>
               </div>
             </div>
@@ -1161,14 +1152,193 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
             </div>
 
             <!-- Height resize handle -->
-            <div class="height-handle" @mousedown="onHeightDragStart" @touchstart.prevent="onHeightDragStart">
-              <div class="height-handle-pill" />
+            <div class="be-height-handle" @mousedown="onHeightDragStart" @touchstart.prevent="onHeightDragStart">
+              <div class="be-height-pill" />
             </div>
-            <div class="height-label">{{ editConfig.canvasHeight }}px</div>
-          </div>
+            <div class="be-height-label">{{ Math.round(editConfig.canvasHeight) }}px</div>
+          </main>
+
+          <!-- ── Properties panel ── -->
+          <aside class="be-properties">
+            <!-- No selection: canvas/bg properties -->
+            <template v-if="!selectedEl">
+              <div class="be-prop-section">
+                <div class="be-prop-title">Canvas</div>
+                <div class="be-prop-row">
+                  <label class="be-prop-label">Width</label>
+                  <input type="number" class="be-prop-input" :value="editConfig.designWidth" readonly>
+                </div>
+                <div class="be-prop-row">
+                  <label class="be-prop-label">Height</label>
+                  <input type="number" class="be-prop-input" :value="Math.round(editConfig.canvasHeight)" @input="editConfig.canvasHeight = +($event.target as any).value; if (fabricCanvas) { fabricCanvas.setDimensions({ width: editConfig.designWidth, height: editConfig.canvasHeight }); nextTick(() => renderSlideToCanvas()) }">
+                </div>
+              </div>
+
+              <div v-if="editSlide" class="be-prop-section">
+                <div class="be-prop-title">Background</div>
+                <select v-model="editSlide.bgType" class="be-prop-select">
+                  <option value="gradient">Gradient</option>
+                  <option value="color">Solid color</option>
+                  <option value="image">Image</option>
+                </select>
+                <div v-if="editSlide.bgType !== 'image'" class="be-color-row">
+                  <div class="be-color-field">
+                    <label class="be-prop-label">Color 1</label>
+                    <input type="color" v-model="editSlide.bgColor1" class="be-color-pick">
+                  </div>
+                  <div v-if="editSlide.bgType === 'gradient'" class="be-color-field">
+                    <label class="be-prop-label">Color 2</label>
+                    <input type="color" v-model="editSlide.bgColor2" class="be-color-pick">
+                  </div>
+                </div>
+                <template v-else>
+                  <input type="file" accept="image/*" @change="onBgFile" class="be-file-input">
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Overlay</label>
+                    <input type="range" min="0" max="80" class="be-range" :value="Math.round(editSlide.overlay * 100)" @input="editSlide.overlay = ($event.target as any).value / 100">
+                    <span class="be-range-val">{{ Math.round(editSlide.overlay * 100) }}%</span>
+                  </div>
+                </template>
+              </div>
+
+              <div v-if="editSlide" class="be-prop-section">
+                <div class="be-prop-title">Slide Link</div>
+                <input type="text" v-model="editSlide.clickLink" class="be-prop-input be-prop-input-full" placeholder="/catalog or https://...">
+                <div class="be-hint">Click on entire slide navigates to this URL</div>
+              </div>
+            </template>
+
+            <!-- Element selected: element properties -->
+            <template v-if="selectedEl">
+              <div class="be-prop-section">
+                <div class="be-prop-title">{{ selectedEl.type === 'heading' ? 'Heading' : selectedEl.type === 'subheading' ? 'Subheading' : selectedEl.type === 'button' ? 'Button' : selectedEl.type === 'shape' ? 'Shape' : 'Image' }}</div>
+
+                <!-- Position -->
+                <div class="be-prop-row">
+                  <label class="be-prop-label">X</label>
+                  <input type="number" class="be-prop-input" :value="Math.round(selectedEl.x * 10) / 10" step="0.5" @input="updateEl('x', +($event.target as any).value)">
+                  <label class="be-prop-label" style="margin-left:8px">Y</label>
+                  <input type="number" class="be-prop-input" :value="Math.round(selectedEl.y)" @input="updateEl('y', +($event.target as any).value)">
+                </div>
+
+                <!-- Shape properties -->
+                <template v-if="selectedEl.type === 'shape'">
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">W</label>
+                    <input type="number" class="be-prop-input" :value="selectedEl.width || 200" min="10" @input="updateEl('width', +($event.target as any).value)">
+                    <label class="be-prop-label" style="margin-left:8px">H</label>
+                    <input type="number" class="be-prop-input" :value="selectedEl.height || 100" min="10" @input="updateEl('height', +($event.target as any).value)">
+                  </div>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Fill</label>
+                    <input type="color" :value="selectedEl.color" @input="updateEl('color', ($event.target as any).value)" class="be-color-pick">
+                  </div>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Opacity</label>
+                    <input type="range" min="0" max="100" class="be-range" :value="Math.round((selectedEl.opacity ?? 0.5) * 100)" @input="updateEl('opacity', +($event.target as any).value / 100)">
+                    <span class="be-range-val">{{ Math.round((selectedEl.opacity ?? 0.5) * 100) }}%</span>
+                  </div>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Radius</label>
+                    <input type="range" min="0" max="50" class="be-range" :value="selectedEl.borderRadius || 0" @input="updateEl('borderRadius', +($event.target as any).value)">
+                    <span class="be-range-val">{{ selectedEl.borderRadius || 0 }}</span>
+                  </div>
+                </template>
+
+                <!-- Image properties -->
+                <template v-else-if="selectedEl.type === 'image'">
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Width</label>
+                    <input type="range" :min="30" :max="editConfig!.designWidth" class="be-range" :value="selectedEl.width || 200" @input="updateEl('width', +($event.target as any).value)">
+                    <span class="be-range-val">{{ selectedEl.width || 200 }}px</span>
+                  </div>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Height</label>
+                    <input type="range" :min="30" :max="editConfig!.canvasHeight" class="be-range" :value="selectedEl.height || Math.round((selectedEl.width || 200) * 0.6)" @input="updateEl('height', +($event.target as any).value)">
+                    <span class="be-range-val">{{ selectedEl.height ? selectedEl.height + 'px' : 'auto' }}</span>
+                  </div>
+                  <div class="be-prop-actions">
+                    <button class="be-btn be-btn-outline be-btn-sm" @click="stretchImageToFill(selectedEl)">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                      Stretch to fill
+                    </button>
+                    <button v-if="selectedEl.height" class="be-btn be-btn-outline be-btn-sm" @click="resetImageHeight(selectedEl)">
+                      Reset height
+                    </button>
+                  </div>
+                </template>
+
+                <!-- Text/button properties -->
+                <template v-else>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Font size</label>
+                    <input type="range" min="10" max="120" class="be-range" :value="selectedEl.fontSize" @input="updateEl('fontSize', +($event.target as any).value)">
+                    <span class="be-range-val">{{ selectedEl.fontSize }}</span>
+                  </div>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Weight</label>
+                    <select :value="selectedEl.fontWeight" @input="updateEl('fontWeight', +($event.target as any).value)" class="be-prop-select">
+                      <option :value="300">Light</option><option :value="400">Regular</option><option :value="500">Medium</option>
+                      <option :value="600">Semibold</option><option :value="700">Bold</option><option :value="800">Extra Bold</option>
+                    </select>
+                  </div>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Color</label>
+                    <input type="color" :value="selectedEl.color" @input="updateEl('color', ($event.target as any).value)" class="be-color-pick">
+                  </div>
+                  <div class="be-prop-row">
+                    <label class="be-prop-label">Spacing</label>
+                    <input type="range" min="-2" max="12" class="be-range" :value="selectedEl.letterSpacing" @input="updateEl('letterSpacing', +($event.target as any).value)">
+                    <span class="be-range-val">{{ selectedEl.letterSpacing }}px</span>
+                  </div>
+                  <label class="be-check-row">
+                    <input type="checkbox" :checked="!!selectedEl.shadow" @change="updateEl('shadow', ($event.target as any).checked)">
+                    <span>Text shadow</span>
+                  </label>
+                </template>
+
+                <!-- Common: zIndex -->
+                <div class="be-prop-row">
+                  <label class="be-prop-label">Z-Index</label>
+                  <input type="range" min="0" max="10" class="be-range" :value="selectedEl.zIndex" @input="updateEl('zIndex', +($event.target as any).value)">
+                  <span class="be-range-val">{{ selectedEl.zIndex }}</span>
+                </div>
+
+                <!-- Button link -->
+                <div v-if="selectedEl.type === 'button'" class="be-prop-row">
+                  <label class="be-prop-label">Link</label>
+                  <input type="text" :value="selectedEl.link" @input="updateEl('link', ($event.target as any).value)" class="be-prop-input be-prop-input-full" placeholder="/catalog">
+                </div>
+
+                <!-- Action buttons -->
+                <div class="be-prop-actions">
+                  <button class="be-btn be-btn-outline be-btn-sm" @click="duplicateSelected" title="Ctrl+D">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                    Duplicate
+                  </button>
+                  <button class="be-delete-btn" @click="deleteSelectedEl">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </template>
+
+            <!-- Keyboard shortcuts hint -->
+            <div class="be-shortcuts">
+              <div class="be-prop-title">Shortcuts</div>
+              <div class="be-shortcut-item"><kbd>Ctrl+S</kbd> Save</div>
+              <div class="be-shortcut-item"><kbd>Ctrl+D</kbd> Duplicate</div>
+              <div class="be-shortcut-item"><kbd>Del</kbd> Delete</div>
+              <div class="be-shortcut-item"><kbd>Esc</kbd> Deselect</div>
+              <div class="be-shortcut-item"><kbd>Arrows</kbd> Nudge</div>
+              <div class="be-shortcut-item"><kbd>Shift+Arrows</kbd> Nudge 10px</div>
+              <div class="be-shortcut-item"><kbd>Ctrl+V</kbd> Paste image</div>
+            </div>
+          </aside>
         </div>
       </div>
-    </template>
+    </Teleport>
   </section>
 </template>
 
@@ -1208,6 +1378,7 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
 }
 .display-heading { font-weight: 800; }
 .display-subheading { opacity: 0.9; }
+.display-shape { pointer-events: none; }
 .display-button {
   display: inline-block; padding: 11px 28px;
   background: rgba(255,255,255,0.95); border-radius: 24px;
@@ -1231,148 +1402,161 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
 .dot { width: 9px; height: 9px; border-radius: 50%; background: #ccc; border: none; cursor: pointer; padding: 0; transition: all 0.15s; }
 .dot.active { background: var(--primary, #1a5632); transform: scale(1.25); }
 
-/* ═══════ Editor Mode ═══════ */
-.editor { background: #0f0f1a; min-height: 100vh; position: relative; z-index: 100; }
+/* ═══════ Editor Overlay ═══════ */
+.banner-editor-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: #0f0f1a; color: #fff;
+  display: flex; flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
 
-/* Top bar */
-.ed-topbar {
+/* ── Toolbar ── */
+.be-toolbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 20px; background: #16162a; border-bottom: 1px solid #2a2a40;
+  height: 52px; min-height: 52px;
+  padding: 0 16px;
+  background: #16162a;
+  border-bottom: 1px solid #2a2a40;
+  flex-shrink: 0;
+  overflow-x: auto;
 }
-.ed-topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.ed-topbar-right { display: flex; align-items: center; gap: 8px; }
-.ed-logo { font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
-.ed-variant-toggle { display: flex; gap: 2px; background: #1e1e35; border-radius: 8px; padding: 2px; }
-.ed-variant-btn {
-  display: flex; align-items: center; gap: 5px; padding: 5px 12px;
-  border: none; border-radius: 6px; background: transparent;
-  color: #888; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+.be-toolbar-left {
+  display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0;
 }
-.ed-variant-btn:hover { color: #ccc; }
-.ed-variant-btn.active { background: #2d8b4e; color: #fff; }
-.ed-slides { display: flex; gap: 4px; }
-.ed-slide-btn {
-  width: 28px; height: 28px; border-radius: 6px; border: 1px solid #3a3a50;
-  background: transparent; color: #888; font-size: 12px; font-weight: 600; cursor: pointer;
+.be-toolbar-right {
+  display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0;
+  margin-left: 16px;
 }
-.ed-slide-btn.active { background: #ff6d00; border-color: #ff6d00; color: #fff; }
-.ed-slide-add { border-style: dashed; color: #ff6d00; border-color: #ff6d00; }
-.ed-slide-add:hover { background: rgba(255,109,0,0.15); }
-.ed-btn-sm { padding: 4px 8px; border-radius: 6px; background: transparent; border: 1px solid #3a3a50; color: #888; cursor: pointer; display: flex; align-items: center; }
-.ed-btn-sm:hover { border-color: #666; color: #fff; }
+.be-close-btn {
+  width: 32px; height: 32px; border-radius: 6px;
+  background: transparent; border: 1px solid #3a3a50;
+  color: #888; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.be-close-btn:hover { border-color: #e55; color: #e55; }
+.be-title {
+  font-size: 14px; font-weight: 700; color: #fff;
+  letter-spacing: 0.3px; white-space: nowrap;
+}
 
-.ed-btn { padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; }
-.ed-btn-ghost { background: transparent; color: #999; border: 1px solid #3a3a50; }
-.ed-btn-ghost:hover { border-color: #666; color: #fff; }
-.ed-btn-primary { background: #ff6d00; color: #fff; }
-.ed-btn-primary:hover { background: #e65100; }
-.ed-btn-primary:disabled { opacity: 0.5; }
-.ed-save-error { color: #ff4444; font-size: 12px; font-weight: 600; margin-right: 8px; }
+/* Variant toggle */
+.be-variant-toggle {
+  display: flex; gap: 2px;
+  background: #1e1e35; border-radius: 8px; padding: 2px;
+}
+.be-variant-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border: none; border-radius: 6px;
+  background: transparent; color: #888;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
+}
+.be-variant-btn:hover { color: #ccc; }
+.be-variant-btn.active { background: #0D945B; color: #fff; }
 
-/* Workspace */
-.ed-workspace { display: flex; height: calc(100vh - 50px); }
+/* Add group */
+.be-add-group {
+  display: flex; gap: 4px;
+}
 
-/* Sidebar */
-.ed-sidebar {
-  width: 220px; background: #16162a; border-right: 1px solid #2a2a40;
-  padding: 16px; overflow-y: auto; flex-shrink: 0;
+/* Slides */
+.be-slides {
+  display: flex; align-items: center; gap: 4px;
 }
-.ed-sidebar-section { margin-bottom: 20px; }
-.ed-sidebar-title { font-size: 10px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+.be-slides-label {
+  font-size: 11px; color: #555; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-right: 2px;
+}
+.be-slide-btn {
+  width: 26px; height: 26px; border-radius: 6px;
+  border: 1px solid #3a3a50; background: transparent;
+  color: #888; font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: all 0.15s;
+}
+.be-slide-btn.active { background: #0D945B; border-color: #0D945B; color: #fff; }
+.be-slide-add { border-style: dashed; color: #0D945B; border-color: #0D945B; }
+.be-slide-add:hover { background: rgba(13,148,91,0.15); }
+.be-slide-action-btn {
+  width: 24px; height: 24px; border-radius: 4px;
+  background: transparent; border: 1px solid #2a2a40;
+  color: #666; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.be-slide-action-btn:hover { border-color: #666; color: #fff; }
 
-.ed-add-btn {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 10px 12px; background: #1e1e35; border: 1px solid #2a2a40;
-  border-radius: 8px; color: #ccc; font-size: 13px; cursor: pointer;
-  margin-bottom: 6px; transition: all 0.15s;
+/* Buttons */
+.be-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 6px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  border: none; transition: all 0.15s; white-space: nowrap;
 }
-.ed-add-btn:hover { background: #2a2a45; border-color: #ff6d00; color: #fff; }
-.ed-add-btn svg { color: #ff6d00; }
+.be-btn-outline {
+  background: transparent; border: 1px solid #3a3a50; color: #888;
+}
+.be-btn-outline:hover { border-color: #666; color: #fff; }
+.be-btn-ghost {
+  background: transparent; color: #999; border: 1px solid #3a3a50;
+}
+.be-btn-ghost:hover { border-color: #666; color: #fff; }
+.be-btn-save {
+  background: #0D945B; color: #fff;
+}
+.be-btn-save:hover { background: #0a7a4b; }
+.be-btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+.be-btn-sm { padding: 5px 10px; font-size: 11px; }
+.be-copy-btn { color: #0D945B !important; border-color: #0D945B !important; }
+.be-copy-btn:hover { background: rgba(13,148,91,0.15); }
+.be-save-error { color: #e55; font-size: 12px; font-weight: 600; margin-right: 8px; }
 
-.ed-select {
-  width: 100%; padding: 7px 10px; background: #1e1e35; border: 1px solid #2a2a40;
-  border-radius: 6px; color: #ccc; font-size: 12px; margin-bottom: 8px;
+/* ── Workspace ── */
+.be-workspace {
+  display: flex; flex: 1; min-height: 0;
 }
-.ed-color-row { display: flex; gap: 6px; margin-bottom: 8px; }
-.ed-color-pick { width: 36px; height: 30px; border: 1px solid #3a3a50; border-radius: 6px; padding: 0; cursor: pointer; background: none; }
-.ed-file { font-size: 11px; color: #999; margin-bottom: 8px; display: block; }
-
-.ed-range-row {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
-}
-.ed-range-row > span:first-child { font-size: 11px; color: #888; min-width: 60px; flex-shrink: 0; }
-.ed-range-row input[type="range"] { flex: 1; accent-color: #ff6d00; }
-.ed-range-val { font-size: 11px; color: #ff6d00; font-weight: 700; min-width: 28px; text-align: right; }
-.ed-text-input { flex: 1; padding: 5px 8px; background: #1e1e35; border: 1px solid #2a2a40; border-radius: 5px; color: #ccc; font-size: 12px; font-family: inherit; }
-
-.ed-check-row {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
-  font-size: 12px; color: #999; cursor: pointer;
-}
-.ed-check-row input { accent-color: #ff6d00; }
-.ed-hint { font-size: 10px; color: #555; margin-top: 4px; }
-.ed-paste-hint {
-  font-size: 10px; color: #555; margin-top: 6px; padding: 6px 8px;
-  background: rgba(255,255,255,0.03); border-radius: 4px; text-align: center;
-}
-.ed-delete-btn {
-  display: flex; align-items: center; gap: 6px; width: 100%;
-  padding: 8px 12px; background: rgba(220,50,50,0.1); border: 1px solid rgba(220,50,50,0.3);
-  border-radius: 6px; color: #e55; font-size: 12px; cursor: pointer; margin-top: 8px;
-}
-.ed-delete-btn:hover { background: rgba(220,50,50,0.2); }
 
 /* Canvas area */
-.ed-canvas-area {
+.be-canvas-area {
   flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: flex-start; padding: 40px 20px; overflow: auto;
+  justify-content: flex-start; padding: 24px 20px;
+  overflow: auto; min-width: 0;
 }
 
-/* Device toolbar */
-.ed-device-bar {
+.be-canvas-info {
   display: flex; align-items: center; gap: 12px; justify-content: center;
   margin-bottom: 12px; padding: 6px 14px;
   background: #1e1e35; border: 1px solid #2a2a40; border-radius: 8px;
 }
-.ed-device-select {
+.be-device-select {
   padding: 4px 8px; background: #16162a; border: 1px solid #3a3a50;
   border-radius: 6px; color: #ccc; font-size: 12px; font-weight: 600; cursor: pointer;
 }
-.ed-device-dims { font-size: 12px; color: #888; font-weight: 500; font-variant-numeric: tabular-nums; }
-.ed-device-zoom {
-  font-size: 11px; color: #ff6d00; font-weight: 700;
-  padding: 2px 8px; background: rgba(255,109,0,0.1); border-radius: 4px;
+.be-dims {
+  font-size: 12px; color: #888; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.be-zoom {
+  font-size: 11px; color: #0D945B; font-weight: 700;
+  padding: 2px 8px; background: rgba(13,148,91,0.1); border-radius: 4px;
 }
 
-/* Canvas scaler (layout box for CSS-scaled canvas) */
-.ed-canvas-scaler {
+/* Canvas wrapper */
+.be-canvas-wrapper {
   position: relative; overflow: visible;
   border-radius: 8px;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 20px 60px rgba(0,0,0,0.5);
 }
-
-/* Mobile frame */
-.ed-canvas-mobile-frame {
+.be-canvas-mobile-frame {
   border-radius: 0;
   box-shadow: -1px 0 0 #2a2a40, 1px 0 0 #2a2a40;
-  outline: 2px solid rgba(255,109,0,0.3); outline-offset: -2px;
+  outline: 2px solid rgba(13,148,91,0.3); outline-offset: -2px;
 }
-
-/* Fabric wrapper inside scaler */
-.ed-fabric-wrap {
-  position: relative;
-}
-
-/* Fabric canvas gets sized by fabric.Canvas, this wraps it */
-.ed-fabric-wrap :deep(canvas) {
-  display: block;
-}
-.ed-fabric-wrap :deep(.canvas-container) {
-  border-radius: 8px;
-}
-.ed-canvas-mobile-frame .ed-fabric-wrap :deep(.canvas-container) {
-  border-radius: 0;
-}
+.be-fabric-inner { position: relative; }
+.be-fabric-inner :deep(canvas) { display: block; }
+.be-fabric-inner :deep(.canvas-container) { border-radius: 8px; }
+.be-canvas-mobile-frame .be-fabric-inner :deep(.canvas-container) { border-radius: 0; }
 
 /* Phone mockup */
 .phone-mockup {
@@ -1425,28 +1609,146 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
 .phone-home-pill {
   width: 100px; height: 4px; background: #ccc; border-radius: 2px;
 }
-.ed-copy-desktop { color: #ff6d00 !important; border-color: #ff6d00 !important; gap: 5px; }
-.ed-copy-desktop:hover { background: rgba(255,109,0,0.15); }
-
-.ed-image-actions { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
-.ed-image-actions .ed-add-btn { font-size: 11px; padding: 7px 10px; }
 
 /* Height resize handle */
-.height-handle {
+.be-height-handle {
   width: 200px; height: 20px; cursor: ns-resize;
   display: flex; align-items: center; justify-content: center;
   margin-top: 4px;
 }
-.height-handle-pill {
+.be-height-pill {
   width: 60px; height: 6px; background: #3a3a50; border-radius: 3px;
   transition: background 0.15s;
 }
-.height-handle:hover .height-handle-pill { background: #ff6d00; }
-.height-label { font-size: 11px; color: #555; margin-top: 4px; }
+.be-height-handle:hover .be-height-pill { background: #0D945B; }
+.be-height-label { font-size: 11px; color: #555; margin-top: 4px; }
 
-/* Mobile adjustments */
+/* ── Properties Panel ── */
+.be-properties {
+  width: 300px; min-width: 300px;
+  background: #16162a; border-left: 1px solid #2a2a40;
+  padding: 16px; overflow-y: auto;
+  flex-shrink: 0;
+}
+.be-prop-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #1e1e35;
+}
+.be-prop-section:last-child { border-bottom: none; }
+.be-prop-title {
+  font-size: 10px; font-weight: 700; color: #555;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.be-prop-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 10px;
+}
+.be-prop-label {
+  font-size: 11px; color: #888;
+  min-width: 50px; flex-shrink: 0;
+}
+.be-prop-input {
+  flex: 1; padding: 6px 8px;
+  background: #1a1a2e; border: 1px solid #2a2a40;
+  border-radius: 5px; color: #ccc;
+  font-size: 12px; font-family: inherit;
+  transition: border-color 0.15s;
+  min-width: 0;
+}
+.be-prop-input:focus { outline: none; border-color: #0D945B; }
+.be-prop-input[readonly] { opacity: 0.5; cursor: not-allowed; }
+.be-prop-input-full { width: 100%; flex: none; }
+.be-prop-select {
+  width: 100%; padding: 7px 10px;
+  background: #1a1a2e; border: 1px solid #2a2a40;
+  border-radius: 6px; color: #ccc;
+  font-size: 12px; margin-bottom: 8px;
+}
+.be-prop-select:focus { outline: none; border-color: #0D945B; }
+
+.be-color-row {
+  display: flex; gap: 8px; margin-bottom: 10px;
+}
+.be-color-field {
+  display: flex; align-items: center; gap: 6px;
+}
+.be-color-pick {
+  width: 36px; height: 30px;
+  border: 1px solid #3a3a50; border-radius: 6px;
+  padding: 0; cursor: pointer; background: none;
+}
+.be-file-input {
+  font-size: 11px; color: #999; margin-bottom: 10px; display: block;
+}
+
+.be-range {
+  flex: 1; accent-color: #0D945B;
+  min-width: 0;
+}
+.be-range-val {
+  font-size: 11px; color: #0D945B; font-weight: 700;
+  min-width: 32px; text-align: right;
+}
+
+.be-check-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px; font-size: 12px; color: #999; cursor: pointer;
+}
+.be-check-row input { accent-color: #0D945B; }
+
+.be-hint {
+  font-size: 10px; color: #555; margin-top: 4px;
+}
+
+.be-prop-actions {
+  display: flex; gap: 6px; margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.be-delete-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: rgba(238,85,85,0.1); border: 1px solid rgba(238,85,85,0.3);
+  border-radius: 6px; color: #e55;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: all 0.15s;
+}
+.be-delete-btn:hover { background: rgba(238,85,85,0.2); }
+
+/* Shortcuts panel */
+.be-shortcuts {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #1e1e35;
+}
+.be-shortcut-item {
+  font-size: 11px; color: #555; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 8px;
+}
+.be-shortcut-item kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  background: #1e1e35; border: 1px solid #2a2a40;
+  border-radius: 3px; font-size: 10px; color: #888;
+  font-family: inherit; min-width: 28px; text-align: center;
+}
+
+/* ── Responsive ── */
+@media (max-width: 960px) {
+  .be-toolbar { padding: 0 10px; gap: 6px; }
+  .be-toolbar-left { gap: 8px; }
+  .be-add-group { display: none; }
+  .be-properties { width: 240px; min-width: 240px; padding: 12px; }
+}
 @media (max-width: 768px) {
-  .ed-sidebar { width: 180px; padding: 12px; }
-  .ed-canvas-area { padding: 16px 8px; }
+  .be-workspace { flex-direction: column-reverse; }
+  .be-properties {
+    width: 100%; min-width: 100%;
+    max-height: 200px; border-left: none;
+    border-top: 1px solid #2a2a40;
+  }
+  .be-canvas-area { padding: 16px 8px; }
 }
 </style>
