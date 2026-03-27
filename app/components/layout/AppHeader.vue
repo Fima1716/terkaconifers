@@ -197,8 +197,8 @@ function toggleMobile() { mobileMenuOpen.value = !mobileMenuOpen.value }
         <a href="https://max.ru/id592005855318_biz" target="_blank" rel="noopener" class="social-btn" title="MAX">
           <img :src="pub('images/max-logo.svg')" width="20" height="20" alt="MAX" style="border-radius: 4px;">
         </a>
-        <a href="https://dzen.ru/rusinovsad" target="_blank" rel="noopener" class="social-btn" title="Дзен">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M11.6 2A9.6 9.6 0 0 0 2 11.6C2 17.3 5.4 22 11.6 22h.8C18.6 22 22 17.3 22 11.6v-.8A9.2 9.2 0 0 0 12.4 2h-.8Zm3.6 13.2c-1.2 1.2-2.4 1.6-3.2 1.6s-2-.4-3.2-1.6C7.6 14 7.2 12.8 7.2 12s.4-2 1.6-3.2C10 7.6 11.2 7.2 12 7.2s2 .4 3.2 1.6c1.2 1.2 1.6 2.4 1.6 3.2s-.4 2-1.6 3.2Z" fill="currentColor"/></svg>
+        <a href="https://dzen.ru/rusinovsad" target="_blank" rel="noopener" class="social-btn dzen-btn" title="Дзен">
+          <img :src="pub('images/dzen-dark.svg')" height="16" style="width: auto;" alt="Дзен">
         </a>
       </div>
 
