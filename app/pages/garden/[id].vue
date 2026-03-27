@@ -44,10 +44,12 @@ const stats = computed(() => {
 
 // Garden profile data
 const gardenProfile = ref<any>(null)
+const buyButtonsEnabled = ref(false)
 onMounted(async () => {
   try {
     const data = await $fetch<any>('/api/gardens')
     gardenProfile.value = data.gardens?.[gardenName.value] || null
+    buyButtonsEnabled.value = !!data.showBuyButtons
   } catch {}
 })
 
@@ -196,7 +198,7 @@ useHead({
             {{ gardenProfile.contacts }}
           </p>
 
-          <div v-if="buyLink" class="profile-buylink">
+          <div v-if="buyLink && buyButtonsEnabled" class="profile-buylink">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
             <a :href="buyLink" target="_blank" rel="noopener">Купить растения этого сада</a>
           </div>

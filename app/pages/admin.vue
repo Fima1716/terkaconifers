@@ -253,6 +253,25 @@ const tabs = [
   { id: 'users', label: 'Пользователи', icon: 'users' },
 ]
 
+// Buy buttons toggle
+const showBuyButtons = ref(false)
+async function loadBuyButtonsSetting() {
+  try {
+    const data = await $fetch<any>('/api/gardens')
+    showBuyButtons.value = !!data.showBuyButtons
+  } catch {}
+}
+async function toggleBuyButtons() {
+  try {
+    const res = await $fetch<any>('/api/admin/site-settings', {
+      method: 'PUT',
+      body: { showBuyButtons: !showBuyButtons.value },
+    })
+    showBuyButtons.value = res.showBuyButtons
+    showMsg(res.showBuyButtons ? 'Кнопки «Купить» включены' : 'Кнопки «Купить» выключены')
+  } catch (e: any) { showMsg(e?.data?.message || 'Ошибка', 'err') }
+}
+
 // Maintenance mode
 const maintenanceMode = ref({ enabled: false, message: '' })
 const maintenanceMsg = ref('')
@@ -290,6 +309,7 @@ onMounted(async () => {
   await loadStats()
   await loadBanner()
   await loadMaintenance()
+  await loadBuyButtonsSetting()
 })
 
 async function loadStats() {
@@ -542,6 +562,23 @@ function formatDate(iso: string) {
                 <input v-model="maintenanceMsg" type="text" class="input" placeholder="Сайт временно закрыт на профилактику..." style="flex: 1;">
                 <button class="btn-secondary" @click="saveMaintenanceMsg">Сохранить</button>
               </div>
+            </div>
+          </div>
+
+          <!-- Buy buttons toggle -->
+          <div v-if="auth.isSuperAdmin" class="panel" :class="{ 'maintenance-active': showBuyButtons }">
+            <div class="maintenance-header">
+              <div>
+                <h3>Кнопки «Купить»</h3>
+                <p class="panel-desc">Показать кнопки «Купить» на карточках растений для садов, у которых настроена ссылка.</p>
+              </div>
+              <button
+                class="btn-maintenance"
+                :class="showBuyButtons ? 'btn-danger' : 'btn-secondary'"
+                @click="toggleBuyButtons"
+              >
+                {{ showBuyButtons ? 'Выключить' : 'Включить' }}
+              </button>
             </div>
           </div>
 

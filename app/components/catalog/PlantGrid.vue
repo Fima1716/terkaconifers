@@ -6,12 +6,15 @@ defineProps<{
   eagerCount?: number
 }>()
 
-// Load garden + per-plant buy links once
+// Load garden + per-plant buy links once (only if showBuyButtons enabled)
 const buyLinks = ref<Record<string, string>>({})
 const plantBuyLinks = ref<Record<string, string>>({})
+const buyEnabled = ref(false)
 onMounted(async () => {
   try {
     const data = await $fetch<any>(`/api/gardens?_=${Date.now()}`)
+    if (!data.showBuyButtons) return
+    buyEnabled.value = true
     const links: Record<string, string> = {}
     for (const [name, profile] of Object.entries(data.gardens || {})) {
       if ((profile as any).buyLink) links[name] = (profile as any).buyLink
@@ -24,7 +27,7 @@ onMounted(async () => {
 
 <template>
   <div class="plant-grid">
-    <PlantCard v-for="(plant, i) in plants" :key="plant.id" :plant="plant" :eager="i < (eagerCount ?? 0)" :buy-link="plantBuyLinks[String(plant.id)] || buyLinks[plant.garden_display] || undefined" />
+    <PlantCard v-for="(plant, i) in plants" :key="plant.id" :plant="plant" :eager="i < (eagerCount ?? 0)" :buy-link="buyEnabled ? (plantBuyLinks[String(plant.id)] || buyLinks[plant.garden_display] || undefined) : undefined" />
   </div>
 </template>
 
