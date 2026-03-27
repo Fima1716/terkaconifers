@@ -23,6 +23,7 @@ interface BEl {
 
 interface Slide {
   bgType: string; bgColor1: string; bgColor2: string; bgImage: string; overlay: number
+  bgFit?: 'cover' | 'contain' | 'fill' // background image fit mode
   elements: BEl[]
   clickLink?: string  // entire slide acts as a link
   // Legacy fields
@@ -306,8 +307,21 @@ async function renderSlideToCanvas() {
     const src = slide.bgImage.startsWith('data:') ? slide.bgImage : imgUrl(slide.bgImage)
     try {
       const img = await fabric.FabricImage.fromURL(src, { crossOrigin: 'anonymous' })
-      img.scaleToWidth(dw)
-      if (img.getScaledHeight() < ch) img.scaleToHeight(ch)
+      const fit = slide.bgFit || 'cover'
+      if (fit === 'cover') {
+        // Scale to fill, crop overflow (centered)
+        const scaleW = dw / img.width!, scaleH = ch / img.height!
+        const s = Math.max(scaleW, scaleH)
+        img.scale(s)
+      } else if (fit === 'contain') {
+        // Scale to fit inside, letterbox (centered)
+        const scaleW = dw / img.width!, scaleH = ch / img.height!
+        const s = Math.min(scaleW, scaleH)
+        img.scale(s)
+      } else {
+        // fill: stretch to exact dimensions
+        img.set({ scaleX: dw / img.width!, scaleY: ch / img.height! })
+      }
       img.set({
         left: dw / 2,
         top: ch / 2,
@@ -960,7 +974,7 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
           >
             <div class="slide-wrapper" :style="{ height: config.canvasHeight * s + 'px' }">
               <div class="slide-inner" :style="{ transform: `scale(${s})`, width: (100 / s) + '%', height: config.canvasHeight + 'px' }">
-                <div class="slide-bg-abs" :style="bgStyle(slide, config.canvasHeight)">
+                <div class="slide-bg-abs" :style="{ ...bgStyle(slide, config.canvasHeight), backgroundSize: slide.bgFit === 'contain' ? 'contain' : slide.bgFit === 'fill' ? '100% 100%' : 'cover' }">
                   <div v-if="slide.bgType === 'image' && slide.bgImage" class="slide-overlay" :style="{ opacity: slide.overlay }" />
                 </div>
                 <template v-for="el in slide.elements" :key="el.id">
@@ -1194,10 +1208,24 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
                 <template v-else>
                   <input type="file" accept="image/*" @change="onBgFile" class="be-file-input">
                   <div class="be-prop-row">
+                    <label class="be-prop-label">Fit</label>
+                    <select class="be-prop-select-sm" :value="editSlide.bgFit || 'cover'" @change="editSlide.bgFit = ($event.target as any).value; nextTick(() => renderSlideToCanvas())">
+                      <option value="cover">Cover (заполнить)</option>
+                      <option value="contain">Contain (вместить)</option>
+                      <option value="fill">Fill (растянуть)</option>
+                    </select>
+                  </div>
+                  <div class="be-prop-row">
                     <label class="be-prop-label">Overlay</label>
                     <input type="range" min="0" max="80" class="be-range" :value="Math.round(editSlide.overlay * 100)" @input="editSlide.overlay = ($event.target as any).value / 100">
                     <span class="be-range-val">{{ Math.round(editSlide.overlay * 100) }}%</span>
                   </div>
+                  <button class="be-btn-sm" @click="editSlide.bgFit = 'contain'; editConfig!.canvasHeight = Math.round(editConfig!.designWidth * 9/16); nextTick(() => { if (fabricCanvas) { fabricCanvas.setDimensions({ width: editConfig!.designWidth, height: editConfig!.canvasHeight }); } renderSlideToCanvas() })">
+                    Подогнать 16:9
+                  </button>
+                  <button class="be-btn-sm" style="margin-top:4px" @click="editSlide.bgFit = 'contain'; editConfig!.canvasHeight = Math.round(editConfig!.designWidth * 3/4); nextTick(() => { if (fabricCanvas) { fabricCanvas.setDimensions({ width: editConfig!.designWidth, height: editConfig!.canvasHeight }); } renderSlideToCanvas() })">
+                    Подогнать 4:3
+                  </button>
                 </template>
               </div>
 
@@ -1667,6 +1695,16 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
   font-size: 12px; margin-bottom: 8px;
 }
 .be-prop-select:focus { outline: none; border-color: #0D945B; }
+.be-prop-select-sm {
+  padding: 5px 8px; background: #1a1a2e; border: 1px solid #2a2a40;
+  border-radius: 5px; color: #ccc; font-size: 11px; flex: 1;
+}
+.be-btn-sm {
+  width: 100%; padding: 6px 10px; background: rgba(13,148,91,0.1);
+  border: 1px solid rgba(13,148,91,0.3); border-radius: 6px;
+  color: #0D945B; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.be-btn-sm:hover { background: rgba(13,148,91,0.2); }
 
 .be-color-row {
   display: flex; gap: 8px; margin-bottom: 10px;
