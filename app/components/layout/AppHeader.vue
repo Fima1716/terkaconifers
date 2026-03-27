@@ -199,7 +199,6 @@ function toggleMobile() { mobileMenuOpen.value = !mobileMenuOpen.value }
         </a>
         <a href="https://dzen.ru/rusinovsad" target="_blank" rel="noopener" class="social-btn dzen-btn" title="Дзен">
           <img :src="pub('images/dzen-dark.svg')" height="14" style="width: auto;" alt="Дзен">
-          <span class="dzen-label">ДЗЕН</span>
         </a>
       </div>
 
