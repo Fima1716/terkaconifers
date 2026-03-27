@@ -64,13 +64,23 @@ const current = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 const canvasRef = ref<HTMLElement>()
 const viewportRef = ref<HTMLElement>()
+const canvasAreaRef = ref<HTMLElement>()
+const canvasAreaWidth = ref(800)
 const s = ref(1)
 let resizeObs: ResizeObserver | null = null
+let canvasAreaObs: ResizeObserver | null = null
 
 function updateScale() {
   if (!viewportRef.value || !config.value) return
   s.value = Math.min(1, viewportRef.value.clientWidth / config.value.designWidth)
 }
+
+// Editor scale: enlarges small canvases (mobile 375px) to fill workspace
+const editorScale = computed(() => {
+  if (!editConfig.value || !editMode.value) return 1
+  const available = canvasAreaWidth.value - 80 // padding
+  return Math.min(2.5, Math.max(0.5, available / editConfig.value.designWidth))
+})
 
 const isMobileView = ref(false)
 
@@ -102,7 +112,7 @@ onMounted(async () => {
     }
   })
 })
-onUnmounted(() => { stopAutoplay(); resizeObs?.disconnect(); window.removeEventListener('keydown', onKey) })
+onUnmounted(() => { stopAutoplay(); resizeObs?.disconnect(); canvasAreaObs?.disconnect(); window.removeEventListener('keydown', onKey) })
 
 function startAutoplay() { timer = setInterval(() => { if (!config.value || editMode.value) return; current.value = (current.value + 1) % config.value.slides.length }, config.value?.interval || 6000) }
 function stopAutoplay() { if (timer) { clearInterval(timer); timer = null } }
@@ -181,6 +191,13 @@ async function startEdit() {
   } catch { mobileConfig.value = null }
   selectedId.value = ''; editMode.value = true; stopAutoplay(); current.value = 0
   window.addEventListener('keydown', onKey)
+  nextTick(() => {
+    if (canvasAreaRef.value) {
+      canvasAreaWidth.value = canvasAreaRef.value.clientWidth
+      canvasAreaObs = new ResizeObserver(() => { canvasAreaWidth.value = canvasAreaRef.value!.clientWidth })
+      canvasAreaObs.observe(canvasAreaRef.value)
+    }
+  })
 }
 
 async function switchVariant(variant: 'desktop' | 'mobile') {
@@ -246,7 +263,7 @@ function copyDesktopToMobile() {
 
 function cancelEdit() {
   editMode.value = false; selectedId.value = ''; editConfig.value = null; desktopConfigCache.value = null; mobileConfig.value = null; bgFile.value = null; bgFileSlideIndex.value = -1; saveError.value = ''; snapLines.value = []; textEditing.value = false
-  window.removeEventListener('keydown', onKey); resetTimer()
+  window.removeEventListener('keydown', onKey); canvasAreaObs?.disconnect(); canvasAreaObs = null; resetTimer()
 }
 
 // ── Slide management ───────────────────────
@@ -378,7 +395,7 @@ function onElDown(el: BEl, e: MouseEvent | TouchEvent) {
     if (!dragged && Math.hypot(mx - cx, my - cy) < 4) return
     dragged = true; isDragging.value = true; ev.preventDefault()
     let newX = ox + (mx - cx) / rect.width * 100
-    let newY = oy + (my - cy)
+    let newY = oy + (my - cy) / editorScale.value
     const lines: typeof snapLines.value = []
     const centerX = 50
     const centerY = editConfig.value!.canvasHeight / 2
@@ -419,7 +436,7 @@ function onResizeDown(el: BEl, handle: string, e: MouseEvent | TouchEvent) {
     ev.preventDefault()
     const mx = 'touches' in ev ? ev.touches[0].clientX : ev.clientX
     const my = 'touches' in ev ? ev.touches[0].clientY : ev.clientY
-    const dx = mx - startX, dy = my - startY
+    const dx = (mx - startX) / editorScale.value, dy = (my - startY) / editorScale.value
     if (handle.includes('r')) el.width = Math.max(30, startW + dx)
     if (handle.includes('b')) el.height = Math.max(30, (startH || Math.round(startW * 0.6)) + dy)
     if (handle === 'br' && !startH) {
@@ -456,7 +473,7 @@ function onHeightDragStart(e: MouseEvent | TouchEvent) {
   const onMove = (ev: MouseEvent | TouchEvent) => {
     ev.preventDefault()
     const my = 'touches' in ev ? ev.touches[0].clientY : ev.clientY
-    editConfig.value!.canvasHeight = Math.max(lowestY, startH + (my - startY))
+    editConfig.value!.canvasHeight = Math.max(lowestY, startH + (my - startY) / editorScale.value)
   }
   const onUp = () => {
     document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp)
@@ -637,9 +654,6 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
               Из десктопа
             </button>
-            <select v-if="editVariant === 'mobile'" class="ed-device-select" :value="selectedDevice" @change="applyDevicePreset(+($event.target as any).value)">
-              <option v-for="(d, i) in DEVICES" :key="i" :value="i">{{ d.name }} ({{ d.w }}px)</option>
-            </select>
             <div class="ed-slides">
               <button v-for="(_, i) in editConfig.slides" :key="i" :class="['ed-slide-btn', { active: current === i }]" @click="current = i; selectedId = ''">
                 {{ i + 1 }}
@@ -784,25 +798,30 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
           </aside>
 
           <!-- Canvas area -->
-          <div class="ed-canvas-area" @click.self="selectedId = ''; textEditing = false">
-            <!-- Phone shell for mobile editing -->
-            <div v-if="editVariant === 'mobile'" class="phone-shell" :style="{ width: editConfig.designWidth + 32 + 'px' }">
-              <div class="phone-bezel-top">
-                <div class="phone-notch">
-                  <div class="phone-camera" />
-                </div>
-              </div>
-              <div class="phone-screen-label">{{ DEVICES[selectedDevice].name }} — {{ editConfig.designWidth }}×{{ editConfig.canvasHeight }}px</div>
+          <div ref="canvasAreaRef" class="ed-canvas-area" @click.self="selectedId = ''; textEditing = false">
+            <!-- Device toolbar -->
+            <div class="ed-device-bar">
+              <template v-if="editVariant === 'mobile'">
+                <select class="ed-device-select" :value="selectedDevice" @change="applyDevicePreset(+($event.target as any).value)">
+                  <option v-for="(d, i) in DEVICES" :key="i" :value="i">{{ d.name }}</option>
+                </select>
+                <span class="ed-device-dims">{{ editConfig.designWidth }} × {{ editConfig.canvasHeight }}</span>
+              </template>
+              <template v-else>
+                <span class="ed-device-dims">Desktop — {{ editConfig.designWidth }} × {{ editConfig.canvasHeight }}</span>
+              </template>
+              <span class="ed-device-zoom">{{ Math.round(editorScale * 100) }}%</span>
             </div>
-            <div v-else class="ed-device-label-desktop">Desktop — {{ editConfig.designWidth }}px</div>
-            <div
-              ref="canvasRef"
-              :class="['ed-canvas', { 'ed-canvas-mobile-frame': editVariant === 'mobile' }]"
-              :style="{ ...bgStyle(editSlide!, editConfig.canvasHeight), minHeight: editConfig.canvasHeight + 'px', maxWidth: editConfig.designWidth + 'px', backgroundSize: 'cover', backgroundPosition: 'center' }"
-              @mousedown.self="selectedId = ''; textEditing = false"
-              @paste="onCanvasPaste"
-              tabindex="0"
-            >
+            <!-- Scaled canvas wrapper -->
+            <div class="ed-canvas-scaler" :style="{ width: editConfig.designWidth * editorScale + 'px', height: editConfig.canvasHeight * editorScale + 'px' }">
+              <div
+                ref="canvasRef"
+                :class="['ed-canvas', { 'ed-canvas-mobile-frame': editVariant === 'mobile' }]"
+                :style="{ ...bgStyle(editSlide!, editConfig.canvasHeight), width: editConfig.designWidth + 'px', minHeight: editConfig.canvasHeight + 'px', transform: `scale(${editorScale})`, transformOrigin: 'top left', backgroundSize: 'cover', backgroundPosition: 'center' }"
+                @mousedown.self="selectedId = ''; textEditing = false"
+                @paste="onCanvasPaste"
+                tabindex="0"
+              >
               <div v-if="editSlide!.bgType === 'image' && editSlide!.bgImage" class="slide-overlay" :style="{ opacity: editSlide!.overlay }" />
 
               <!-- Snap lines -->
@@ -852,12 +871,10 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
               </div>
             </div>
 
+            </div><!-- /ed-canvas-scaler -->
             <!-- Height resize handle -->
             <div class="height-handle" @mousedown="onHeightDragStart" @touchstart.prevent="onHeightDragStart">
               <div class="height-handle-pill" />
-            </div>
-            <div v-if="editVariant === 'mobile'" class="phone-bezel-bottom" :style="{ width: editConfig.designWidth + 32 + 'px' }">
-              <div class="phone-home-indicator" />
             </div>
             <div class="height-label">{{ editConfig.canvasHeight }}px</div>
           </div>
@@ -1024,43 +1041,33 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
 }
 
 .ed-canvas {
-  position: relative; width: 100%;
+  position: relative;
   border-radius: 8px; box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 20px 60px rgba(0,0,0,0.5);
   overflow: visible; cursor: default;
 }
-/* Phone shell */
-.phone-shell {
-  display: flex; flex-direction: column; align-items: center; margin: 0 auto;
+/* Device toolbar */
+.ed-device-bar {
+  display: flex; align-items: center; gap: 12px; justify-content: center;
+  margin-bottom: 12px; padding: 6px 14px;
+  background: #1e1e35; border: 1px solid #2a2a40; border-radius: 8px;
 }
-.phone-bezel-top {
-  width: 100%; height: 32px; background: #1a1a2e; border-radius: 28px 28px 0 0;
-  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px;
-  border: 3px solid #2a2a40; border-bottom: none;
-}
-.phone-notch {
-  width: 120px; height: 22px; background: #1a1a2e; border-radius: 0 0 16px 16px;
-  display: flex; align-items: center; justify-content: center;
-}
-.phone-camera { width: 10px; height: 10px; background: #2a2a40; border-radius: 50%; border: 1px solid #3a3a50; }
-.phone-screen-label {
-  font-size: 10px; color: #555; margin-top: 4px; margin-bottom: -4px; text-align: center;
-}
-.phone-bezel-bottom {
-  height: 24px; background: #1a1a2e; border-radius: 0 0 28px 28px;
-  display: flex; align-items: center; justify-content: center;
-  border: 3px solid #2a2a40; border-top: none; margin: 0 auto;
-}
-.phone-home-indicator {
-  width: 40%; height: 4px; background: #3a3a50; border-radius: 2px;
-}
-.ed-canvas-mobile-frame {
-  border-left: 3px solid #2a2a40; border-right: 3px solid #2a2a40;
-  border-radius: 0; box-shadow: none;
-}
-.ed-device-label-desktop { font-size: 11px; color: #555; margin-bottom: 8px; text-align: center; }
 .ed-device-select {
-  padding: 4px 8px; background: #1e1e35; border: 1px solid #3a3a50;
-  border-radius: 6px; color: #ccc; font-size: 11px; font-weight: 600; cursor: pointer;
+  padding: 4px 8px; background: #16162a; border: 1px solid #3a3a50;
+  border-radius: 6px; color: #ccc; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.ed-device-dims { font-size: 12px; color: #888; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ed-device-zoom {
+  font-size: 11px; color: #ff6d00; font-weight: 700;
+  padding: 2px 8px; background: rgba(255,109,0,0.1); border-radius: 4px;
+}
+
+/* Canvas scaler (layout box for CSS-scaled canvas) */
+.ed-canvas-scaler { position: relative; overflow: visible; }
+
+/* Mobile frame — subtle dashed border */
+.ed-canvas-mobile-frame {
+  border: 2px dashed rgba(255,109,0,0.3); border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.05);
 }
 .ed-copy-desktop { color: #ff6d00 !important; border-color: #ff6d00 !important; gap: 5px; }
 .ed-copy-desktop:hover { background: rgba(255,109,0,0.15); }
