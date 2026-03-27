@@ -257,7 +257,7 @@ const tabs = [
 const showBuyButtons = ref(false)
 async function loadBuyButtonsSetting() {
   try {
-    const data = await $fetch<any>('/api/gardens')
+    const data = await $fetch<any>(`/api/gardens?_=${Date.now()}`)
     showBuyButtons.value = !!data.showBuyButtons
   } catch {}
 }
