@@ -253,12 +253,14 @@ const tabs = [
   { id: 'users', label: 'Пользователи', icon: 'users' },
 ]
 
-// Buy buttons toggle
+// Buy buttons toggles
 const showBuyButtons = ref(false)
+const showBuyButtonsGarden = ref(false)
 async function loadBuyButtonsSetting() {
   try {
     const data = await $fetch<any>(`/api/gardens?_=${Date.now()}`)
     showBuyButtons.value = !!data.showBuyButtons
+    showBuyButtonsGarden.value = !!data.showBuyButtonsGarden
   } catch {}
 }
 async function toggleBuyButtons() {
@@ -268,7 +270,17 @@ async function toggleBuyButtons() {
       body: { showBuyButtons: !showBuyButtons.value },
     })
     showBuyButtons.value = res.showBuyButtons
-    showMsg(res.showBuyButtons ? 'Кнопки «Купить» включены' : 'Кнопки «Купить» выключены')
+    showMsg(res.showBuyButtons ? 'Кнопки в каталоге включены' : 'Кнопки в каталоге выключены')
+  } catch (e: any) { showMsg(e?.data?.message || 'Ошибка', 'err') }
+}
+async function toggleBuyButtonsGarden() {
+  try {
+    const res = await $fetch<any>('/api/admin/site-settings', {
+      method: 'PUT',
+      body: { showBuyButtonsGarden: !showBuyButtonsGarden.value },
+    })
+    showBuyButtonsGarden.value = res.showBuyButtonsGarden
+    showMsg(res.showBuyButtonsGarden ? 'Кнопки на страницах садов включены' : 'Кнопки на страницах садов выключены')
   } catch (e: any) { showMsg(e?.data?.message || 'Ошибка', 'err') }
 }
 
@@ -565,12 +577,12 @@ function formatDate(iso: string) {
             </div>
           </div>
 
-          <!-- Buy buttons toggle -->
-          <div v-if="auth.isSuperAdmin" class="panel" :class="{ 'maintenance-active': showBuyButtons }">
-            <div class="maintenance-header">
+          <!-- Buy buttons toggles -->
+          <div v-if="auth.isSuperAdmin" class="panel">
+            <h3>Кнопки «Купить»</h3>
+            <div class="maintenance-header" style="margin-top: 12px;">
               <div>
-                <h3>Кнопки «Купить»</h3>
-                <p class="panel-desc">Показать кнопки «Купить» на карточках растений для садов, у которых настроена ссылка.</p>
+                <p class="panel-desc" style="margin: 0;"><strong>В общем каталоге</strong> — на странице /catalog</p>
               </div>
               <button
                 class="btn-maintenance"
@@ -578,6 +590,18 @@ function formatDate(iso: string) {
                 @click="toggleBuyButtons"
               >
                 {{ showBuyButtons ? 'Выключить' : 'Включить' }}
+              </button>
+            </div>
+            <div class="maintenance-header" style="margin-top: 12px;">
+              <div>
+                <p class="panel-desc" style="margin: 0;"><strong>На страницах садов</strong> — на странице конкретного сада</p>
+              </div>
+              <button
+                class="btn-maintenance"
+                :class="showBuyButtonsGarden ? 'btn-danger' : 'btn-secondary'"
+                @click="toggleBuyButtonsGarden"
+              >
+                {{ showBuyButtonsGarden ? 'Выключить' : 'Включить' }}
               </button>
             </div>
           </div>

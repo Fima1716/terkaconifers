@@ -17,7 +17,10 @@ export default defineEventHandler(async (event) => {
   if (typeof body.showBuyButtons === 'boolean') {
     data.showBuyButtons = body.showBuyButtons
   }
+  if (typeof body.showBuyButtonsGarden === 'boolean') {
+    data.showBuyButtonsGarden = body.showBuyButtonsGarden
+  }
 
   writeFileSync(path, JSON.stringify(data, null, 2))
-  return { ok: true, showBuyButtons: data.showBuyButtons ?? false }
+  return { ok: true, showBuyButtons: data.showBuyButtons ?? false, showBuyButtonsGarden: data.showBuyButtonsGarden ?? false }
 })

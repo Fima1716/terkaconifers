@@ -49,7 +49,7 @@ onMounted(async () => {
   try {
     const data = await $fetch<any>('/api/gardens')
     gardenProfile.value = data.gardens?.[gardenName.value] || null
-    buyButtonsEnabled.value = !!data.showBuyButtons
+    buyButtonsEnabled.value = !!data.showBuyButtonsGarden
   } catch {}
 })
 
@@ -311,7 +311,7 @@ useHead({
             </div>
 
             <!-- Grid -->
-            <PlantGrid v-else-if="catalog.visiblePlants.length > 0" :plants="catalog.visiblePlants" :eager-count="5" />
+            <PlantGrid v-else-if="catalog.visiblePlants.length > 0" :plants="catalog.visiblePlants" :eager-count="5" :garden-context="gardenName" />
 
             <div v-else class="empty-state">
               <div class="empty-state-icon">

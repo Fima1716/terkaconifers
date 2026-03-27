@@ -40,7 +40,7 @@ const gardens = computed(() => {
         <NuxtLink
           v-for="g in gardens"
           :key="g.display"
-          :to="`/catalog?garden=${encodeURIComponent(g.display)}`"
+          :to="`/garden/${encodeURIComponent(g.display)}`"
           class="garden-tag"
         >
           <span class="gt-name">{{ g.display }}</span>
@@ -53,7 +53,7 @@ const gardens = computed(() => {
         <NuxtLink
           v-for="g in gardens"
           :key="g.display"
-          :to="`/catalog?garden=${encodeURIComponent(g.display)}`"
+          :to="`/garden/${encodeURIComponent(g.display)}`"
           class="garden-chip"
         >
           <span class="garden-icon" :class="g.type_ru === 'Питомник' ? 'nursery' : ''">

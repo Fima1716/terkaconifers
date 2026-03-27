@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import type { Plant } from '~/stores/catalog'
 
-defineProps<{
+const props = defineProps<{
   plants: Plant[]
   eagerCount?: number
+  gardenContext?: string  // when on a garden page, pass garden name
 }>()
 
-// Load garden + per-plant buy links once (only if showBuyButtons enabled)
+// Load garden + per-plant buy links once
 const buyLinks = ref<Record<string, string>>({})
 const plantBuyLinks = ref<Record<string, string>>({})
 const buyEnabled = ref(false)
 onMounted(async () => {
   try {
     const data = await $fetch<any>(`/api/gardens?_=${Date.now()}`)
-    if (!data.showBuyButtons) return
+    // On garden pages: check gardenContext setting; on catalog: check global setting
+    const allowed = props.gardenContext ? data.showBuyButtonsGarden : data.showBuyButtons
+    if (!allowed) return
     buyEnabled.value = true
     const links: Record<string, string> = {}
     for (const [name, profile] of Object.entries(data.gardens || {})) {
