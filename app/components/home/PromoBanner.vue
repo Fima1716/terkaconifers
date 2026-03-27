@@ -143,6 +143,16 @@ const snapLines = ref<{ type: 'h' | 'v'; pos: number }[]>([])
 const textEditing = ref(false)
 const SNAP_THRESHOLD = 6
 
+// Device presets for mobile preview
+const DEVICES = [
+  { name: 'iPhone SE', w: 375, h: 200 },
+  { name: 'iPhone 14', w: 390, h: 210 },
+  { name: 'iPhone 14 Pro Max', w: 430, h: 220 },
+  { name: 'Galaxy S24', w: 412, h: 215 },
+  { name: 'Pixel 8', w: 393, h: 210 },
+] as const
+const selectedDevice = ref(0)
+
 const editSlide = computed(() => editConfig.value?.slides[current.value] || null)
 const selectedEl = computed(() => editSlide.value?.elements.find(e => e.id === selectedId.value) || null)
 
@@ -207,12 +217,19 @@ async function switchVariant(variant: 'desktop' | 'mobile') {
   }
 }
 
+function applyDevicePreset(idx: number) {
+  selectedDevice.value = idx
+  if (!editConfig.value) return
+  editConfig.value.designWidth = DEVICES[idx].w
+  editConfig.value.canvasHeight = DEVICES[idx].h
+}
+
 function copyDesktopToMobile() {
   const src = desktopConfigCache.value || config.value
   if (!src) return
   const copy: BannerConfig = JSON.parse(JSON.stringify(src))
-  copy.designWidth = 375
-  copy.canvasHeight = 220
+  copy.designWidth = DEVICES[selectedDevice.value].w
+  copy.canvasHeight = DEVICES[selectedDevice.value].h
   for (const slide of copy.slides) {
     for (const el of slide.elements) {
       el.id = genId()
@@ -620,6 +637,9 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
               Из десктопа
             </button>
+            <select v-if="editVariant === 'mobile'" class="ed-device-select" :value="selectedDevice" @change="applyDevicePreset(+($event.target as any).value)">
+              <option v-for="(d, i) in DEVICES" :key="i" :value="i">{{ d.name }} ({{ d.w }}px)</option>
+            </select>
             <div class="ed-slides">
               <button v-for="(_, i) in editConfig.slides" :key="i" :class="['ed-slide-btn', { active: current === i }]" @click="current = i; selectedId = ''">
                 {{ i + 1 }}
@@ -765,7 +785,16 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
 
           <!-- Canvas area -->
           <div class="ed-canvas-area" @click.self="selectedId = ''; textEditing = false">
-            <div v-if="editVariant === 'mobile'" class="ed-device-label">{{ editConfig.designWidth }} × {{ editConfig.canvasHeight }}px — Mobile</div>
+            <!-- Phone shell for mobile editing -->
+            <div v-if="editVariant === 'mobile'" class="phone-shell" :style="{ width: editConfig.designWidth + 32 + 'px' }">
+              <div class="phone-bezel-top">
+                <div class="phone-notch">
+                  <div class="phone-camera" />
+                </div>
+              </div>
+              <div class="phone-screen-label">{{ DEVICES[selectedDevice].name }} — {{ editConfig.designWidth }}×{{ editConfig.canvasHeight }}px</div>
+            </div>
+            <div v-else class="ed-device-label-desktop">Desktop — {{ editConfig.designWidth }}px</div>
             <div
               ref="canvasRef"
               :class="['ed-canvas', { 'ed-canvas-mobile-frame': editVariant === 'mobile' }]"
@@ -826,6 +855,9 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
             <!-- Height resize handle -->
             <div class="height-handle" @mousedown="onHeightDragStart" @touchstart.prevent="onHeightDragStart">
               <div class="height-handle-pill" />
+            </div>
+            <div v-if="editVariant === 'mobile'" class="phone-bezel-bottom" :style="{ width: editConfig.designWidth + 32 + 'px' }">
+              <div class="phone-home-indicator" />
             </div>
             <div class="height-label">{{ editConfig.canvasHeight }}px</div>
           </div>
@@ -996,11 +1028,40 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
   border-radius: 8px; box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 20px 60px rgba(0,0,0,0.5);
   overflow: visible; cursor: default;
 }
-.ed-canvas-mobile-frame {
-  border: 3px solid #3a3a50; border-radius: 24px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 20px 60px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.05);
+/* Phone shell */
+.phone-shell {
+  display: flex; flex-direction: column; align-items: center; margin: 0 auto;
 }
-.ed-device-label { font-size: 11px; color: #666; margin-bottom: 8px; text-align: center; }
+.phone-bezel-top {
+  width: 100%; height: 32px; background: #1a1a2e; border-radius: 28px 28px 0 0;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px;
+  border: 3px solid #2a2a40; border-bottom: none;
+}
+.phone-notch {
+  width: 120px; height: 22px; background: #1a1a2e; border-radius: 0 0 16px 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.phone-camera { width: 10px; height: 10px; background: #2a2a40; border-radius: 50%; border: 1px solid #3a3a50; }
+.phone-screen-label {
+  font-size: 10px; color: #555; margin-top: 4px; margin-bottom: -4px; text-align: center;
+}
+.phone-bezel-bottom {
+  height: 24px; background: #1a1a2e; border-radius: 0 0 28px 28px;
+  display: flex; align-items: center; justify-content: center;
+  border: 3px solid #2a2a40; border-top: none; margin: 0 auto;
+}
+.phone-home-indicator {
+  width: 40%; height: 4px; background: #3a3a50; border-radius: 2px;
+}
+.ed-canvas-mobile-frame {
+  border-left: 3px solid #2a2a40; border-right: 3px solid #2a2a40;
+  border-radius: 0; box-shadow: none;
+}
+.ed-device-label-desktop { font-size: 11px; color: #555; margin-bottom: 8px; text-align: center; }
+.ed-device-select {
+  padding: 4px 8px; background: #1e1e35; border: 1px solid #3a3a50;
+  border-radius: 6px; color: #ccc; font-size: 11px; font-weight: 600; cursor: pointer;
+}
 .ed-copy-desktop { color: #ff6d00 !important; border-color: #ff6d00 !important; gap: 5px; }
 .ed-copy-desktop:hover { background: rgba(255,109,0,0.15); }
 
