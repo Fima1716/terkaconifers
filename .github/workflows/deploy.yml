@@ -1,0 +1,42 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: |
+          rsync -avz --delete \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='.output' \
+            --exclude='.nuxt' \
+            --exclude='data/' \
+            --exclude='public/photos/' \
+            --exclude='public/banner/' \
+            --exclude='public/data/' \
+            --exclude='logs/' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ root@${{ secrets.SSH_HOST }}:/var/www/terka/
+
+      - name: Build & restart
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.SSH_HOST }} << 'EOF'
+            cd /var/www/terka
+            npm install --production
+            npx nuxi build
+            pm2 restart ecosystem.config.cjs
+          EOF

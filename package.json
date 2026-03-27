@@ -1,0 +1,30 @@
+{
+  "name": "terka",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "enrich": "tsx scripts/enrich.ts",
+    "sync": "tsx scripts/sync-max.ts",
+    "clear-new": "tsx scripts/clear-new.ts"
+  },
+  "dependencies": {
+    "@nuxt/content": "^3.12.0",
+    "@nuxtjs/seo": "^4.0.2",
+    "@pinia/nuxt": "^0.11.3",
+    "fuse.js": "^7.1.0",
+    "jose": "^6.2.2",
+    "nuxt": "^4.4.2",
+    "pinia": "^3.0.4",
+    "pinia-plugin-persistedstate": "^4.7.1",
+    "vue": "^3.5.30",
+    "vue-router": "^5.0.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

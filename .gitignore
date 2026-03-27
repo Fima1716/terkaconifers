@@ -1,0 +1,40 @@
+# Nuxt dev/build outputs
+.output
+.data
+.nuxt
+.nitro
+.cache
+dist
+
+# Node dependencies
+node_modules
+
+# Logs
+logs
+*.log
+
+# Misc
+.DS_Store
+.fleet
+.idea
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Runtime data (managed on server)
+data/
+
+# Uploaded content
+public/photos/
+public/banner/
+public/data/
+
+# Stray images
+*.jpg
+*.png
+!public/favicon-32.png
+!public/apple-touch-icon.png
+!public/favicon.jpg
+public/photos
