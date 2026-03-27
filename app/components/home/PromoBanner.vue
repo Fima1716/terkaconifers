@@ -1166,7 +1166,7 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
                 <div class="be-prop-title">Canvas</div>
                 <div class="be-prop-row">
                   <label class="be-prop-label">Width</label>
-                  <input type="number" class="be-prop-input" :value="editConfig.designWidth" readonly>
+                  <input type="number" class="be-prop-input" :value="editConfig.designWidth" @input="editConfig.designWidth = +($event.target as any).value; if (fabricCanvas) { fabricCanvas.setDimensions({ width: editConfig.designWidth, height: editConfig.canvasHeight }); nextTick(() => renderSlideToCanvas()) }">
                 </div>
                 <div class="be-prop-row">
                   <label class="be-prop-label">Height</label>
