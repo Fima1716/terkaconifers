@@ -31,10 +31,9 @@ public/photos/
 public/banner/
 public/data/
 
-# Stray images
-*.jpg
-*.png
-!public/favicon-32.png
-!public/apple-touch-icon.png
-!public/favicon.jpg
+# Stray images in root only
+/*.jpg
+/*.png
+
+# Uploaded content (symlinks/runtime)
 public/photos
