@@ -974,7 +974,7 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
           >
             <div class="slide-wrapper" :style="{ height: config.canvasHeight * s + 'px' }">
               <div class="slide-inner" :style="{ transform: `scale(${s})`, width: (100 / s) + '%', height: config.canvasHeight + 'px' }">
-                <div class="slide-bg-abs" :style="{ ...bgStyle(slide, config.canvasHeight), backgroundSize: slide.bgFit === 'contain' ? 'contain' : slide.bgFit === 'fill' ? '100% 100%' : 'cover' }">
+                <div class="slide-bg-abs" :style="{ ...bgStyle(slide, config.canvasHeight), backgroundSize: slide.bgFit === 'contain' ? 'contain' : slide.bgFit === 'fill' ? '100% 100%' : 'cover', backgroundRepeat: 'no-repeat', backgroundPosition: 'center' }">
                   <div v-if="slide.bgType === 'image' && slide.bgImage" class="slide-overlay" :style="{ opacity: slide.overlay }" />
                 </div>
                 <template v-for="el in slide.elements" :key="el.id">
