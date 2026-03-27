@@ -75,11 +75,12 @@ function updateScale() {
   s.value = Math.min(1, viewportRef.value.clientWidth / config.value.designWidth)
 }
 
-// Editor scale: enlarges small canvases (mobile 375px) to fill workspace
+// Editor scale: fit canvas to workspace without exceeding 1:1
 const editorScale = computed(() => {
   if (!editConfig.value || !editMode.value) return 1
-  const available = canvasAreaWidth.value - 80 // padding
-  return Math.min(2.5, Math.max(0.5, available / editConfig.value.designWidth))
+  const available = canvasAreaWidth.value - 80
+  const natural = available / editConfig.value.designWidth
+  return Math.min(1, Math.max(0.4, natural)) // never zoom above 1:1
 })
 
 const isMobileView = ref(false)
@@ -812,7 +813,27 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
               </template>
               <span class="ed-device-zoom">{{ Math.round(editorScale * 100) }}%</span>
             </div>
-            <!-- Scaled canvas wrapper -->
+
+            <!-- Phone mockup for mobile -->
+            <div v-if="editVariant === 'mobile'" class="phone-mockup" :style="{ width: editConfig.designWidth + 'px' }">
+              <!-- Fake status bar -->
+              <div class="phone-status-bar">
+                <span>9:41</span>
+                <span class="phone-notch-pill" />
+                <span class="phone-status-icons">
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><rect x="2" y="6" width="3" height="12" rx="1"/><rect x="7" y="4" width="3" height="14" rx="1"/><rect x="12" y="2" width="3" height="16" rx="1"/><rect x="17" y="0" width="3" height="18" rx="1"/></svg>
+                </span>
+              </div>
+              <!-- Fake header -->
+              <div class="phone-fake-header">
+                <div class="pfh-back">‹</div>
+                <div class="pfh-logo">🌲</div>
+                <div class="pfh-search"></div>
+              </div>
+            </div>
+
+            <!-- Canvas (scaled for desktop fit, 1:1 for mobile) -->
             <div class="ed-canvas-scaler" :style="{ width: editConfig.designWidth * editorScale + 'px', height: editConfig.canvasHeight * editorScale + 'px' }">
               <div
                 ref="canvasRef"
@@ -872,6 +893,16 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
             </div>
 
             </div><!-- /ed-canvas-scaler -->
+
+            <!-- Fake page content below for mobile context -->
+            <div v-if="editVariant === 'mobile'" class="phone-fake-content" :style="{ width: editConfig.designWidth + 'px' }">
+              <div class="pfc-title">Растения сада <span>152</span></div>
+              <div class="pfc-cards">
+                <div class="pfc-card" /><div class="pfc-card" /><div class="pfc-card" />
+              </div>
+              <div class="phone-home-bar"><div class="phone-home-pill" /></div>
+            </div>
+
             <!-- Height resize handle -->
             <div class="height-handle" @mousedown="onHeightDragStart" @touchstart.prevent="onHeightDragStart">
               <div class="height-handle-pill" />
@@ -1064,10 +1095,63 @@ function onElInput(el: BEl, e: Event) { el.content = (e.target as HTMLElement).t
 /* Canvas scaler (layout box for CSS-scaled canvas) */
 .ed-canvas-scaler { position: relative; overflow: visible; }
 
-/* Mobile frame — subtle dashed border */
+/* Mobile frame — inline with phone mockup */
 .ed-canvas-mobile-frame {
-  border: 2px dashed rgba(255,109,0,0.3); border-radius: 4px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.05);
+  border-radius: 0;
+  box-shadow: -1px 0 0 #2a2a40, 1px 0 0 #2a2a40;
+  outline: 2px solid rgba(255,109,0,0.3); outline-offset: -2px;
+}
+
+/* Phone mockup */
+.phone-mockup {
+  background: #fff; border-radius: 24px 24px 0 0;
+  overflow: hidden; margin: 0 auto;
+  box-shadow: -1px 0 0 #2a2a40, 1px 0 0 #2a2a40, 0 -1px 0 #2a2a40;
+}
+.phone-status-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 16px 4px; font-size: 12px; font-weight: 600; color: #1a1a1a;
+  background: #f8f8f8;
+}
+.phone-notch-pill {
+  width: 80px; height: 22px; background: #1a1a1a; border-radius: 12px;
+}
+.phone-status-icons { display: flex; gap: 4px; color: #1a1a1a; }
+.phone-fake-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: #fff; border-bottom: 1px solid #eee;
+}
+.pfh-back { font-size: 22px; color: #1a5632; font-weight: 300; line-height: 1; }
+.pfh-logo { font-size: 18px; }
+.pfh-search {
+  flex: 1; height: 30px; background: #f0f0f0; border-radius: 16px;
+  border: 1px solid #ddd;
+}
+
+/* Fake content below banner */
+.phone-fake-content {
+  background: #fff; padding: 16px;
+  margin: 0 auto;
+  box-shadow: -1px 0 0 #2a2a40, 1px 0 0 #2a2a40;
+  border-radius: 0 0 24px 24px;
+  overflow: hidden;
+}
+.pfc-title {
+  font-size: 14px; font-weight: 700; color: #333; margin-bottom: 10px;
+}
+.pfc-title span {
+  font-size: 11px; font-weight: 500; color: #999;
+  background: #f0f0f0; padding: 2px 8px; border-radius: 10px; margin-left: 6px;
+}
+.pfc-cards { display: flex; gap: 8px; }
+.pfc-card {
+  width: 33.33%; aspect-ratio: 0.8; background: #f0f0f0; border-radius: 8px;
+}
+.phone-home-bar {
+  display: flex; justify-content: center; padding: 12px 0 4px;
+}
+.phone-home-pill {
+  width: 100px; height: 4px; background: #ccc; border-radius: 2px;
 }
 .ed-copy-desktop { color: #ff6d00 !important; border-color: #ff6d00 !important; gap: 5px; }
 .ed-copy-desktop:hover { background: rgba(255,109,0,0.15); }
