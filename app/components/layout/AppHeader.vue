@@ -198,7 +198,8 @@ function toggleMobile() { mobileMenuOpen.value = !mobileMenuOpen.value }
           <img :src="pub('images/max-logo.svg')" width="20" height="20" alt="MAX" style="border-radius: 4px;">
         </a>
         <a href="https://dzen.ru/rusinovsad" target="_blank" rel="noopener" class="social-btn dzen-btn" title="Дзен">
-          <img :src="pub('images/dzen-dark.svg')" height="16" style="width: auto;" alt="Дзен">
+          <img :src="pub('images/dzen-dark.svg')" height="14" style="width: auto;" alt="Дзен">
+          <span class="dzen-label">ДЗЕН</span>
         </a>
       </div>
 
@@ -396,6 +397,8 @@ function toggleMobile() { mobileMenuOpen.value = !mobileMenuOpen.value }
   opacity: 0.7;
 }
 .social-btn:hover { opacity: 1; }
+.dzen-btn { gap: 3px; }
+.dzen-label { font-size: 11px; font-weight: 800; color: var(--text-secondary); letter-spacing: 0.5px; }
 
 /* Favorites */
 .fav-btn {
