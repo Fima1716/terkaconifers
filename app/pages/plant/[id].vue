@@ -318,6 +318,10 @@ async function sharePlant() {
             <span class="detail-label">Размер</span>
             <span class="detail-value">{{ plant.size_display }}</span>
           </div>
+          <div v-if="plant.originator" class="detail-row">
+            <span class="detail-label">Оригинатор</span>
+            <span class="detail-value">{{ plant.originator }}</span>
+          </div>
           <div v-if="plant.garden_display" class="detail-row">
             <span class="detail-label">Источник</span>
             <span class="detail-value">

@@ -35,6 +35,7 @@ export interface Plant {
   age_max: number | null
   age_display: string
   size_display: string
+  originator: string
   is_russian_enriched: boolean
   is_new: boolean
   price?: number | null

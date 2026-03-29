@@ -5,7 +5,7 @@ const BASE_URL = 'https://platform-api.max.ru'
 
 const EDITABLE_FIELDS = [
   'latin_full', 'name_ru', 'cultivar', 'species', 'genus', 'genus_ru',
-  'region', 'age', 'garden', 'is_russian', 'size',
+  'region', 'age', 'garden', 'is_russian', 'size', 'originator',
 ]
 
 // Build post text for MAX channel from plant data
@@ -29,6 +29,9 @@ function buildMaxText(plant: any): string {
 
   // Size
   if (plant.size) lines.push(`Размер: ${plant.size}`)
+
+  // Originator
+  if (plant.originator) lines.push(`Оригинатор: ${plant.originator}`)
 
   // Garden (display name from hashtag or raw)
   const gardenDisplay = plant.garden?.replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2') || ''

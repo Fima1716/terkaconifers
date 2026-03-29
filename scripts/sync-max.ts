@@ -144,6 +144,11 @@ function extractPlant(text: string, photos: string[], maxUrl: string, nextId: nu
     if (/размер/i.test(line)) { size = line.replace(/Размер:?\s*/i, '').trim(); break }
   }
 
+  let originator = ''
+  for (const line of lines) {
+    if (/оригинатор/i.test(line)) { originator = line.replace(/Оригинатор\s*:?\s*/i, '').trim(); break }
+  }
+
   const hashtags = [...text.matchAll(/#([A-Za-zА-Яа-яЁё0-9_]+)/g)].map(m => m[1])
   const gardenPrefixes = ['Сад', 'Русинов', 'Питомник', 'Коллекция', 'Альпинарий', 'Частный', 'Лес']
   let garden = hashtags.find(h => gardenPrefixes.some(p => h.startsWith(p)) || h.endsWith('Сад') || h.endsWith('сад')) || ''
@@ -173,6 +178,7 @@ function extractPlant(text: string, photos: string[], maxUrl: string, nextId: nu
     age,
     size,
     garden,
+    originator,
     is_russian,
     photos,
     thumbs: photos,
@@ -334,6 +340,7 @@ async function main() {
       if (existingByUrl.region !== plant.region && plant.region) { existingByUrl.region = plant.region; changed = true }
       if (existingByUrl.age !== plant.age && plant.age) { existingByUrl.age = plant.age; changed = true }
       if (!existingByUrl.size && plant.size) { existingByUrl.size = plant.size; changed = true }
+      if (!existingByUrl.originator && plant.originator) { existingByUrl.originator = plant.originator; changed = true }
       if (existingByUrl.name_ru !== plant.name_ru && plant.name_ru) { existingByUrl.name_ru = plant.name_ru; changed = true }
       if (existingByUrl.latin_full !== plant.latin_full) { existingByUrl.latin_full = plant.latin_full; changed = true }
       // Only update photos if:
@@ -367,6 +374,7 @@ async function main() {
         if (plant.region) existingByKey.region = plant.region
         if (plant.age) existingByKey.age = plant.age
         if (plant.size) existingByKey.size = plant.size
+        if (plant.originator) existingByKey.originator = plant.originator
         if (plant.name_ru) existingByKey.name_ru = plant.name_ru
         byUrl.set(msgUrl, existingByKey)
         updated++
@@ -379,6 +387,7 @@ async function main() {
         if (!existingByKey.size && plant.size) existingByKey.size = plant.size
         if (!existingByKey.age && plant.age) existingByKey.age = plant.age
         if (!existingByKey.region && plant.region) existingByKey.region = plant.region
+        if (!existingByKey.originator && plant.originator) existingByKey.originator = plant.originator
       }
       continue
     }
@@ -397,6 +406,7 @@ async function main() {
         if (plant.size && !existing.size) existing.size = plant.size
         if (plant.age && !existing.age) existing.age = plant.age
         if (plant.region && !existing.region) existing.region = plant.region
+        if (plant.originator && !existing.originator) existing.originator = plant.originator
         continue
       }
       // All existing have URLs — skip if exact garden matches or if no URL-less entries remain
@@ -456,6 +466,7 @@ async function main() {
       if (bestMatch.plant.age) entry.age = bestMatch.plant.age
       if (bestMatch.plant.size) entry.size = bestMatch.plant.size
       if (bestMatch.plant.region) entry.region = bestMatch.plant.region
+      if (bestMatch.plant.originator) entry.originator = bestMatch.plant.originator
       byUrl.set(bestMatch.msgUrl, entry)
       relinked++
       updated++

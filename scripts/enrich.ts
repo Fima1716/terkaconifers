@@ -27,6 +27,7 @@ interface RawPlant {
   age: string
   size: string
   garden: string
+  originator: string
   is_russian: boolean
   photos: string[]
   thumbs: string[]

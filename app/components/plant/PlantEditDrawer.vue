@@ -37,6 +37,7 @@ const form = reactive({
   region: props.plant.region_normalized || '',
   age: props.plant.age_display || '',
   garden: props.plant.garden_display || '',
+  originator: props.plant.originator || '',
   is_russian: props.plant.is_russian_enriched || false,
   photos: [...props.plant.photos],
 })
@@ -157,6 +158,11 @@ onMounted(() => {
               <label>Сад</label>
               <input v-model="form.garden" type="text">
             </div>
+          </div>
+
+          <div class="field">
+            <label>Оригинатор</label>
+            <input v-model="form.originator" type="text" placeholder="автор/селекционер сорта">
           </div>
 
           <div class="field toggle-field">
