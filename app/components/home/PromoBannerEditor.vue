@@ -231,7 +231,7 @@ async function renderSlideToCanvas() {
       const tb = new fabric.Textbox(el.content || '', {
         left, top, fontSize: el.fontSize, fontWeight: String(el.fontWeight), fill: el.color,
         fontFamily: 'inherit', charSpacing: el.letterSpacing * 1000 / (el.fontSize || 16),
-        width: dw * 0.9, editable: true, splitByGrapheme: false,
+        width: Math.min(dw * 0.9, 600), editable: true, splitByGrapheme: false,
         data: { belId: el.id, belType: el.type }, ...FABRIC_CTRL,
       })
       if (el.shadow) tb.shadow = new fabric.Shadow({ color: 'rgba(0,0,0,0.3)', blur: 10, offsetX: 0, offsetY: 2 })
@@ -428,7 +428,7 @@ function addElement(type: BEl['type']) {
   if (!editSlide.value) return
   const h = editConfig.value.canvasHeight
   const el: BEl = {
-    id: genId(), type, x: 5, y: Math.min(h - 40, 40 + editSlide.value.elements.length * 50),
+    id: genId(), type, x: 5, y: Math.max(10, Math.min(h - 50, 20 + editSlide.value.elements.length * 30)),
     content: type === 'heading' ? 'Заголовок' : type === 'subheading' ? 'Подзаголовок' : type === 'button' ? 'Кнопка' : '',
     link: type === 'button' ? '/catalog' : undefined,
     fontSize: type === 'heading' ? 32 : type === 'subheading' ? 16 : 14,
