@@ -1,8 +1,21 @@
 <script setup lang="ts">
+import { photoUrl, thumbWebpUrl } from '~/utils/photoUrl'
+
 const route = useRoute()
 const gardenName = computed(() => (route.query.garden as string) || '')
 const status = ref<'pending' | 'agreed' | 'declined' | 'error'>('pending')
 const saving = ref(false)
+
+// Preview data
+const preview = ref<{ plants: { latin_full: string; species_ru: string; thumb: string }[]; count: number }>({ plants: [], count: 0 })
+
+onMounted(async () => {
+  if (gardenName.value) {
+    try {
+      preview.value = await $fetch<any>(`/api/consent-preview?garden=${encodeURIComponent(gardenName.value)}`)
+    } catch {}
+  }
+})
 
 useHead({ title: computed(() => gardenName.value ? `Согласие — ${gardenName.value}` : 'Согласие — Территория Хвойных') })
 
@@ -41,6 +54,29 @@ async function submitConsent(agreed: boolean) {
       <template v-else-if="status === 'pending'">
         <div class="consent-body">
           <p class="consent-garden">{{ gardenName }}</p>
+
+          <!-- Garden preview -->
+          <div v-if="preview.count > 0" class="preview">
+            <p class="preview-count">
+              В каталоге <strong>{{ preview.count }}</strong> {{ preview.count === 1 ? 'растение' : preview.count < 5 ? 'растения' : 'растений' }} из вашего сада
+            </p>
+            <div class="preview-grid">
+              <div v-for="p in preview.plants" :key="p.latin_full" class="preview-plant">
+                <img v-if="p.thumb" :src="thumbWebpUrl(p.thumb)" :alt="p.latin_full" class="preview-img" loading="lazy">
+                <div v-else class="preview-img preview-img-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M12 2L7 8h3l-4 6h3l-5 8h16l-5-8h3l-4-6h3z"/></svg>
+                </div>
+                <div class="preview-info">
+                  <span class="preview-name">{{ p.latin_full }}</span>
+                  <span v-if="p.species_ru" class="preview-species">{{ p.species_ru }}</span>
+                </div>
+              </div>
+            </div>
+            <p v-if="preview.count > 12" class="preview-more">
+              и ещё {{ preview.count - 12 }}...
+            </p>
+          </div>
+
           <p class="consent-text">
             Вы даёте согласие на размещение фотографий и информации о растениях из вашего сада
             в каталоге <strong>«Территория хвойных»</strong> на сайте
@@ -74,6 +110,7 @@ async function submitConsent(agreed: boolean) {
         </div>
         <p class="result-title">Спасибо!</p>
         <p>Согласие для <strong>{{ gardenName }}</strong> получено. Ваши растения будут отображаться на сайте.</p>
+        <p v-if="preview.count > 0" class="result-hint">{{ preview.count }} растений уже в каталоге</p>
       </div>
 
       <!-- Declined -->
@@ -105,7 +142,7 @@ async function submitConsent(agreed: boolean) {
 .consent-card {
   background: #fff; border-radius: 20px;
   box-shadow: 0 8px 40px rgba(0,0,0,0.08);
-  max-width: 480px; width: 100%;
+  max-width: 520px; width: 100%;
   padding: 32px 28px; text-align: center;
 }
 
@@ -118,6 +155,37 @@ async function submitConsent(agreed: boolean) {
   text-align: center; margin-bottom: 16px;
   padding: 10px 16px; background: #e8f5e9; border-radius: 10px;
 }
+
+/* Preview */
+.preview { margin-bottom: 20px; }
+.preview-count { font-size: 14px; color: #333; text-align: center; margin-bottom: 12px; }
+
+.preview-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+}
+@media (min-width: 400px) { .preview-grid { grid-template-columns: repeat(4, 1fr); } }
+
+.preview-plant { text-align: center; }
+.preview-img {
+  width: 100%; aspect-ratio: 0.85;
+  border-radius: 8px; object-fit: cover;
+  background: #f5f7f5;
+}
+.preview-img-empty {
+  display: flex; align-items: center; justify-content: center;
+  color: #ccc;
+}
+.preview-info { margin-top: 4px; }
+.preview-name {
+  display: block; font-size: 10px; font-weight: 600; color: #333;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.preview-species {
+  display: block; font-size: 9px; color: #999; font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.preview-more { font-size: 12px; color: #999; text-align: center; margin-top: 8px; }
 
 .consent-text { font-size: 14px; color: #333; line-height: 1.6; margin-bottom: 12px; }
 .consent-text a { color: #1a5632; font-weight: 600; }
@@ -159,4 +227,5 @@ async function submitConsent(agreed: boolean) {
 .result-ok { background: #e8f5e9; color: #2e7d32; }
 .result-no { background: #fce4ec; color: #c62828; }
 .result-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; color: #333; }
+.result-hint { font-size: 13px; color: #999; margin-top: 12px; }
 </style>
