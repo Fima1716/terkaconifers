@@ -99,6 +99,10 @@ useHead({ title: 'Сады и коллекции — Территория Хво
             и питомников со всей России
           </p>
         </div>
+        <NuxtLink to="/map" class="btn-map">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          Карта
+        </NuxtLink>
       </header>
 
       <!-- Search & Sort toolbar -->
@@ -264,7 +268,16 @@ useHead({ title: 'Сады и коллекции — Территория Хво
 /* ── Header ── */
 .page-header {
   margin-bottom: 28px;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
 }
+.btn-map {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 18px; background: var(--bg-alt, #f5f5f5);
+  border: 1.5px solid var(--border, #e0e0e0); border-radius: 10px;
+  font-size: 13px; font-weight: 600; color: var(--text, #333);
+  white-space: nowrap; flex-shrink: 0; transition: all 0.15s;
+}
+.btn-map:hover { border-color: var(--primary); color: var(--primary); }
 
 .header-text h1 {
   font-size: 26px;
