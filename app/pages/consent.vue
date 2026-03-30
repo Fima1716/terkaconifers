@@ -36,6 +36,30 @@ async function submitAction(action: 'agree' | 'decline' | 'revoke') {
   saving.value = false
 }
 
+// Contact form
+const showContact = ref(false)
+const contactSent = ref(false)
+const contactForm = ref({ name: '', contact: '', message: '' })
+
+async function sendContact() {
+  saving.value = true
+  try {
+    await $fetch('/api/consent-public', {
+      method: 'POST',
+      body: {
+        garden: gardenName.value,
+        action: 'contact',
+        name: contactForm.value.name,
+        contact: contactForm.value.contact,
+        message: contactForm.value.message,
+      },
+    })
+    contactSent.value = true
+    showContact.value = false
+  } catch {}
+  saving.value = false
+}
+
 const consentDate = computed(() => {
   if (!preview.value.consentAt) return ''
   return new Date(preview.value.consentAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -112,11 +136,48 @@ const isDeclined = computed(() => preview.value.consent === false && !result.val
           <a href="https://terkaconifers.ru/catalog" target="_blank" class="preview-link">Смотреть на сайте</a>
         </div>
 
-        <div class="revoke-section">
-          <p class="revoke-text">Хотите убрать сад с сайта или изменить информацию?</p>
-          <button class="btn-revoke" :disabled="saving" @click="submitAction('revoke')">
-            Отозвать публикацию
-          </button>
+        <!-- Contact / Revoke section -->
+        <div class="contact-section">
+          <p class="contact-title">Связаться с командой</p>
+          <p class="contact-desc">Изменить информацию, обновить фото или убрать сад с сайта</p>
+
+          <div v-if="!showContact && !contactSent" class="contact-actions">
+            <button class="btn-contact" @click="showContact = true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+              Написать
+            </button>
+            <button class="btn-revoke" :disabled="saving" @click="submitAction('revoke')">
+              Отозвать публикацию
+            </button>
+          </div>
+
+          <!-- Contact form -->
+          <div v-if="showContact && !contactSent" class="contact-form">
+            <div class="cf-field">
+              <label>Ваше имя</label>
+              <input v-model="contactForm.name" type="text" placeholder="Иван Петров">
+            </div>
+            <div class="cf-field">
+              <label>Как с вами связаться *</label>
+              <input v-model="contactForm.contact" type="text" placeholder="Telegram, телефон или email">
+            </div>
+            <div class="cf-field">
+              <label>Сообщение *</label>
+              <textarea v-model="contactForm.message" rows="3" placeholder="Что хотите изменить или сообщить..." />
+            </div>
+            <div class="cf-actions">
+              <button class="btn-agree" style="font-size: 14px; padding: 12px;" :disabled="saving || !contactForm.contact.trim() || !contactForm.message.trim()" @click="sendContact">
+                {{ saving ? 'Отправка...' : 'Отправить' }}
+              </button>
+              <button class="btn-decline" style="font-size: 13px; padding: 10px;" @click="showContact = false">Отмена</button>
+            </div>
+          </div>
+
+          <!-- Contact sent -->
+          <div v-if="contactSent" class="contact-sent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2" width="20" height="20"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>Сообщение отправлено! Команда свяжется с вами.</span>
+          </div>
         </div>
       </template>
 
@@ -231,19 +292,49 @@ const isDeclined = computed(() => preview.value.consent === false && !result.val
   font-size: 13px; font-weight: 600; color: #1a5632;
 }
 
-/* Revoke section */
-.revoke-section {
+/* Contact / Revoke section */
+.contact-section {
   margin-top: 24px; padding-top: 20px;
-  border-top: 1px solid #e8e8e8;
+  border-top: 1px solid #e8e8e8; text-align: center;
 }
-.revoke-text { font-size: 13px; color: #999; margin-bottom: 10px; }
+.contact-title { font-size: 15px; font-weight: 700; color: #333; margin-bottom: 4px; }
+.contact-desc { font-size: 13px; color: #999; margin-bottom: 14px; }
+
+.contact-actions { display: flex; gap: 8px; }
+.btn-contact {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 12px; background: #1a5632; color: #fff;
+  border: none; border-radius: 12px; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-contact:hover { background: #0f3a20; }
 .btn-revoke {
-  width: 100%; padding: 12px;
+  flex: 1; padding: 12px;
   background: none; color: #999; border: 1.5px solid #ddd; border-radius: 12px;
-  font-size: 14px; font-weight: 500; cursor: pointer;
+  font-size: 13px; font-weight: 500; cursor: pointer;
   transition: all 0.15s;
 }
 .btn-revoke:hover { border-color: #e53935; color: #e53935; }
+
+/* Contact form */
+.contact-form { text-align: left; }
+.cf-field { margin-bottom: 12px; }
+.cf-field label { display: block; font-size: 12px; font-weight: 600; color: #666; margin-bottom: 4px; }
+.cf-field input, .cf-field textarea {
+  width: 100%; padding: 10px 14px;
+  background: #f9faf9; border: 1.5px solid #ddd; border-radius: 10px;
+  font-size: 14px; color: #333; outline: none;
+  font-family: inherit; resize: vertical;
+  transition: border-color 0.15s;
+}
+.cf-field input:focus, .cf-field textarea:focus { border-color: #1a5632; }
+.cf-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+
+.contact-sent {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px; background: #e8f5e9; border-radius: 10px;
+  font-size: 13px; font-weight: 600; color: #2e7d32;
+}
 
 /* Text */
 .consent-text { font-size: 14px; color: #333; line-height: 1.6; margin-bottom: 12px; }

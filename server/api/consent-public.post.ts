@@ -65,10 +65,18 @@ export default defineEventHandler(async (event) => {
   }
 
   if (action === 'revoke') {
-    // Don't auto-remove — send request to admins
     await notifyAdmins(`🔄 Запрос на отзыв публикации: ${gardenName}\n\nВладелец сада просит убрать сад с сайта. Проверьте и снимите галочку в Согласиях если подтвердите.`)
-
     return { ok: true, action: 'revoke_requested' }
+  }
+
+  if (action === 'contact') {
+    const name = body.name?.trim() || 'Не указано'
+    const contact = body.contact?.trim()
+    const message = body.message?.trim()
+    if (!contact || !message) throw createError({ statusCode: 400, message: 'Заполните контакт и сообщение' })
+
+    await notifyAdmins(`📩 Сообщение от владельца сада\n\n🏡 Сад: ${gardenName}\n👤 Имя: ${name}\n📱 Контакт: ${contact}\n\n💬 ${message}`)
+    return { ok: true, action: 'contact_sent' }
   }
 
   throw createError({ statusCode: 400, message: 'Неизвестное действие' })
