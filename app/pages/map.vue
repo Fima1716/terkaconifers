@@ -60,23 +60,26 @@ const gardens = computed<GardenPin[]>(() => {
   const map = new Map<string, { region: string; count: number; genera: Set<string> }>()
   for (const p of catalog.catalog) {
     const g = p.garden_display
-    if (!g || g === 'Частные сады' || g === 'Частный сад') continue
-    if (!map.has(g)) map.set(g, { region: p.region_normalized || '', count: 0, genera: new Set() })
-    const entry = map.get(g)!
+    if (!g) continue
+    const region = p.region_normalized || ''
+    // "Частные сады" — split by region, each becomes separate pin
+    const isPrivate = g === 'Частные сады' || g === 'Частный сад'
+    const key = isPrivate ? `Частный сад|${region}` : g
+    if (!map.has(key)) map.set(key, { region, count: 0, genera: new Set(), displayName: isPrivate ? 'Частный сад' : g })
+    const entry = map.get(key)!
     entry.count++
     if (p.genus_ru) entry.genera.add(p.genus_ru)
   }
   const pins: GardenPin[] = []
-  for (const [name, data] of map) {
+  for (const [key, data] of map) {
     const coords = COORDS[data.region]
     if (!coords) continue
-    // Jitter to separate overlapping pins
     const jitter = (s: string) => { let h = 0; for (const c of s) h = ((h << 5) - h + c.charCodeAt(0)) | 0; return (h % 100) / 500 }
     pins.push({
-      name,
+      name: (data as any).displayName || key,
       region: data.region,
       count: data.count,
-      coords: [coords[0] + jitter(name), coords[1] + jitter(name + 'x')],
+      coords: [coords[0] + jitter(key), coords[1] + jitter(key + 'x')],
       genera: [...data.genera].slice(0, 5),
     })
   }
