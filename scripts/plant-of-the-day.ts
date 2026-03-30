@@ -1,6 +1,7 @@
 /**
- * «Растение дня» — выбирает случайное растение из каталога,
- * генерирует красивое описание через DeepSeek и постит в MAX.
+ * «Растение дня» — берёт случайное растение из каталога
+ * и постит его в MAX в том же формате что и канал-каталог,
+ * с шапкой "Растение дня" и ссылкой на сайт.
  *
  * Запуск: npx tsx scripts/plant-of-the-day.ts --force
  * Крон:  каждый день в 10:00, скрипт сам решает постить (1 из 7).
@@ -9,7 +10,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
 
 const ROOT = resolve(import.meta.dirname, '..')
-const CATALOG_PATH = resolve(ROOT, 'data/catalog-enriched.json')
+const RAW_CATALOG = resolve(ROOT, 'data/raw/catalog.json')
 const STATE_PATH = resolve(ROOT, 'data/potd-state.json')
 
 // Load .env
@@ -24,12 +25,11 @@ if (existsSync(envPath)) {
 
 const MAX_TOKEN = envVars.MAX_BOT_TOKEN || ''
 const CHAT_ID = envVars.ADMIN_CHAT_ID || '-72548188058297'
-const AI_KEY = envVars.DEEPSEEK_API_KEY || envVars.GROQ_API_KEY || ''
 const FORCE = process.argv.includes('--force')
 
 if (!MAX_TOKEN) { console.error('No MAX_BOT_TOKEN in .env'); process.exit(1) }
 
-// ── State: track posted plants ───────────────────────────
+// ── State ────────────────────────────────────────────────
 interface PotdState {
   posted: string[]
   lastDate: string
@@ -47,7 +47,7 @@ function saveState(s: PotdState) {
   writeFileSync(STATE_PATH, JSON.stringify(s, null, 2))
 }
 
-// ── Should we post today? (1 in 7 chance) ────────────────
+// ── Should we post today? ────────────────────────────────
 function shouldPostToday(): boolean {
   if (FORCE) return true
   const today = new Date().toISOString().slice(0, 10)
@@ -56,110 +56,68 @@ function shouldPostToday(): boolean {
   return Math.abs(hash) % 7 === 0
 }
 
-// ── Pick a good plant ────────────────────────────────────
+// ── Pick plant ───────────────────────────────────────────
 function pickPlant(catalog: any[], posted: string[]): any | null {
   const postedSet = new Set(posted)
   const candidates = catalog.filter(p =>
-    p.thumbs?.length > 0 && p.species_ru && p.latin_full && !postedSet.has(p.latin_full)
+    p.photos?.length > 0 && p.latin_full && !postedSet.has(p.latin_full)
   )
   if (!candidates.length) return null
 
   const scored = candidates.map(p => ({
     plant: p,
     score: (p.photos?.length > 1 ? 2 : 0) +
-           (p.conditions ? 1 : 0) +
-           (p.is_russian_enriched ? 1 : 0) +
-           (p.age_display ? 1 : 0) +
+           (p.is_russian ? 1 : 0) +
+           (p.age ? 1 : 0) +
            Math.random() * 3,
   }))
   scored.sort((a, b) => b.score - a.score)
   return scored[0].plant
 }
 
-// ── AI description ───────────────────────────────────────
-async function generateDescription(p: any): Promise<string> {
-  const facts = [
-    `Латинское: ${p.latin_full}`,
-    `Русское: ${p.species_ru}`,
-    p.region_normalized ? `Регион: ${p.region_normalized}` : '',
-    p.age_display ? `Возраст: ${p.age_display}` : '',
-    p.size_display ? `Размер: ${p.size_display}` : '',
-    p.garden_display ? `Сад: ${p.garden_display}` : '',
-    p.form_ru ? `Форма: ${p.form_ru}` : '',
-    p.color_ru ? `Цвет: ${p.color_ru}` : '',
-    p.originator ? `Оригинатор: ${p.originator}` : '',
-  ].filter(Boolean).join('\n')
+// ── Format like MAX channel post ─────────────────────────
+function formatPost(p: any): string {
+  const lines: string[] = []
 
-  if (!AI_KEY) return fallbackFormat(p)
+  // Header
+  lines.push('Растение дня')
+  lines.push('')
 
-  try {
-    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${AI_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        temperature: 0.7,
-        max_tokens: 300,
-        messages: [
-          {
-            role: 'system',
-            content: `Ты пишешь короткий пост «Растение дня» для канала любителей хвойных растений.
+  // Latin name + Russian name (same format as channel)
+  lines.push(p.latin_full)
+  if (p.name_ru) lines.push(p.name_ru)
+  lines.push('')
 
-ФОРМАТ (строго):
-1. Первая строка: "Растение дня" (без эмодзи)
-2. Пустая строка
-3. Латинское название
-4. Русское название вида
-5. Пустая строка
-6. 2-3 предложения — интересный факт о сорте, виде или форме. Пиши живо, для увлечённых садоводов. Без воды и банальностей. Если знаешь что-то конкретное про этот сорт — пиши. Если нет — расскажи про вид или форму.
-7. Пустая строка
-8. Характеристики (каждая с новой строки, БЕЗ эмодзи):
-   Регион: ...
-   Возраст: ...
-   Размер: ... (если есть)
-   Сад: ...
-9. Пустая строка
-10. Последняя строка: "2300+ хвойных в каталоге — terkaconifers.ru"
+  // Info lines
+  if (p.region) lines.push(p.region)
+  if (p.age) lines.push(`Возраст: ${p.age}`)
+  if (p.size) lines.push(`Размер: ${p.size}`)
+  if (p.originator) lines.push(`Оригинатор: ${p.originator}`)
 
-ПРАВИЛА:
-- Никаких эмодзи
-- Никаких хештегов
-- Текст без кавычек-ёлочек
-- Пиши по-русски, кроме латинского названия
-- Если данных мало — не выдумывай, просто напиши что есть
-- ВАЖНО: если сорт российский (оригинатор русский, или название кириллицей) — НЕ ВЫДУМЫВАЙ историю происхождения. Про российские сорта почти нет публичной информации. Напиши только факты из данных. Можешь написать пару слов про сам ВИД (не сорт), например особенности хвои или формы роста этого вида в целом.
-- Никогда не придумывай откуда назван сорт, кто его вывел, где нашли — если этого нет в данных`
-          },
-          { role: 'user', content: facts }
-        ],
-      }),
-    })
-    if (!resp.ok) {
-      console.error(`AI error: ${resp.status}`)
-      return fallbackFormat(p)
-    }
-    const data: any = await resp.json()
-    return data.choices?.[0]?.message?.content?.trim() || fallbackFormat(p)
-  } catch (e) {
-    console.error(`AI error: ${e}`)
-    return fallbackFormat(p)
+  // Garden name (human-readable)
+  const garden = (p.garden || '').replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2')
+  if (garden) lines.push(garden)
+
+  // Hashtags
+  if (p.hashtags?.length) {
+    lines.push(p.hashtags.map((h: string) => `#${h}`).join('\n'))
   }
-}
 
-function fallbackFormat(p: any): string {
-  const lines = ['Растение дня', '', p.latin_full, p.species_ru, '']
-  if (p.region_normalized) lines.push(`Регион: ${p.region_normalized}`)
-  if (p.age_display) lines.push(`Возраст: ${p.age_display}`)
-  if (p.size_display) lines.push(`Размер: ${p.size_display}`)
-  if (p.garden_display) lines.push(`Сад: ${p.garden_display}`)
-  lines.push('', '2300+ хвойных в каталоге — terkaconifers.ru')
+  // Footer
+  lines.push('')
+  lines.push('terkaconifers.ru — каталог хвойных растений')
+
   return lines.join('\n')
 }
 
 // ── Post to MAX ──────────────────────────────────────────
-async function postToMax(text: string, photoUrl: string) {
+async function postToMax(text: string, photos: string[]) {
+  const attachments = photos.map(ph => {
+    const url = ph.startsWith('http') ? ph : `https://terkaconifers.ru/${ph}`
+    return { type: 'image', payload: { url } }
+  })
   const body: any = { text }
-  if (photoUrl) body.attachments = [{ type: 'image', payload: { url: photoUrl } }]
+  if (attachments.length) body.attachments = attachments
   const resp = await fetch(`https://platform-api.max.ru/messages?chat_id=${CHAT_ID}`, {
     method: 'POST',
     headers: { Authorization: MAX_TOKEN, 'Content-Type': 'application/json' },
@@ -183,25 +141,18 @@ async function main() {
     return
   }
 
-  if (!existsSync(CATALOG_PATH)) { console.error('Catalog not found'); process.exit(1) }
-  const data = JSON.parse(readFileSync(CATALOG_PATH, 'utf-8'))
-  const catalog = data.plants || data
+  if (!existsSync(RAW_CATALOG)) { console.error('Catalog not found'); process.exit(1) }
+  const catalog = JSON.parse(readFileSync(RAW_CATALOG, 'utf-8'))
 
   const plant = pickPlant(catalog, state.posted)
   if (!plant) { console.log('No suitable plant found'); return }
 
-  console.log(`Picked: ${plant.latin_full}`)
-
-  const text = await generateDescription(plant)
-  console.log('---')
+  const text = formatPost(plant)
   console.log(text)
   console.log('---')
+  console.log(`Photos: ${plant.photos.length}`)
 
-  const photoUrl = plant.photos?.[0]
-    ? (plant.photos[0].startsWith('http') ? plant.photos[0] : `https://terkaconifers.ru/${plant.photos[0]}`)
-    : ''
-
-  await postToMax(text, photoUrl)
+  await postToMax(text, plant.photos)
 
   state.posted.push(plant.latin_full)
   state.lastDate = today
