@@ -114,20 +114,16 @@ async function initMap() {
     noWrap: true,
   }).addTo(leafletMap)
 
-  // Custom green marker
-  const icon = L.divIcon({
-    className: 'garden-marker',
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-    popupAnchor: [0, -10],
-  })
+  addMarkers()
+}
 
-  const bigIcon = L.divIcon({
-    className: 'garden-marker garden-marker-big',
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-    popupAnchor: [0, -12],
-  })
+function addMarkers() {
+  if (!leafletMap || !gardens.value.length) return
+  const L = (window as any).L
+  if (!L) return
+
+  const icon = L.divIcon({ className: 'garden-marker', iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -10] })
+  const bigIcon = L.divIcon({ className: 'garden-marker garden-marker-big', iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -12] })
 
   for (const g of gardens.value) {
     const marker = L.marker(g.coords, { icon: g.count > 50 ? bigIcon : icon }).addTo(leafletMap)
@@ -153,7 +149,10 @@ onMounted(() => {
 })
 
 watch(gardens, () => {
-  if (gardens.value.length && (window as any).L) initMap()
+  if (gardens.value.length && (window as any).L) {
+    if (!leafletMap) initMap()
+    else addMarkers()
+  }
 })
 </script>
 
