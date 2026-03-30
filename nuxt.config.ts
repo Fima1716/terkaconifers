@@ -24,6 +24,7 @@ export default defineNuxtConfig({
     { path: '~/components/plant', pathPrefix: false },
     { path: '~/components/cart', pathPrefix: false },
     { path: '~/components/admin', pathPrefix: false },
+    { path: '~/components/garden', pathPrefix: false },
     { path: '~/components/ui', pathPrefix: false },
   ],
 

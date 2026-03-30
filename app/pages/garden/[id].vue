@@ -340,6 +340,9 @@ useHead({
           </div>
         </div>
       </section>
+
+      <!-- Contact section -->
+      <GardenContact :garden-name="gardenName" />
     </div>
   </div>
 </template>
