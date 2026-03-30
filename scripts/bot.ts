@@ -13,6 +13,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
+import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName } from './lib/dupe-check.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const STATE_FILE = resolve(ROOT, 'data/bot-state.json')
@@ -86,62 +87,7 @@ async function answerCallback(cbId: string, note?: string) {
   })
 }
 
-// ── Duplicate detection ──────────────────────────────────
-const VALID_GENERA_BOT = new Set([
-  'Abies', 'Calocedrus', 'Cedrus', 'Chamaecyparis', 'Cryptomeria',
-  'Ginkgo', 'Juniperus', 'Larix', 'Metasequoia', 'Microbiota',
-  'Picea', 'Pinus', 'Platycladus', 'Pseudotsuga', 'Sciadopitys',
-  'Sequoiadendron', 'Taxus', 'Thuja', 'Thujopsis', 'Tsuga',
-])
-
-function findDuplicates(text: string): { latin: string; garden: string; matches: { latin_full: string; garden: string; max_url: string; date: string }[] } | null {
-  if (!text) return null
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
-  if (!lines.length) return null
-
-  // Extract latin name from first line
-  const firstLine = lines[0]
-  const firstWord = firstLine.split(/\s+/)[0]
-  if (!VALID_GENERA_BOT.has(firstWord)) return null
-
-  // Normalize for matching
-  const latinNorm = firstLine
-    .replace(/[\u2018\u2019\u201C\u201D''""'"`]/g, '')
-    .replace(/\s+/g, ' ').trim().toLowerCase()
-
-  // Extract garden from hashtags or text
-  const hashtags = [...text.matchAll(/#([A-Za-zА-Яа-яЁё0-9_]+)/g)].map(m => m[1])
-  const gardenPrefixes = ['Сад', 'Русинов', 'Питомник', 'Коллекция', 'Альпинарий', 'Частный', 'Лес']
-  const garden = hashtags.find(h => gardenPrefixes.some(p => h.startsWith(p)) || h.endsWith('Сад') || h.endsWith('сад')) || ''
-
-  // Load catalog and search
-  const catalogPath = resolve(ROOT, 'data/raw/catalog.json')
-  if (!existsSync(catalogPath)) return null
-  try {
-    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'))
-    const matches = catalog.filter((p: any) => {
-      const pNorm = (p.latin_full || '')
-        .replace(/[\u2018\u2019\u201C\u201D''""'"`]/g, '')
-        .replace(/\s+/g, ' ').trim().toLowerCase()
-      if (pNorm !== latinNorm) return false
-      // Garden comparison: strip spaces for matching (hashtag "РусиновСад" vs display "Русинов Сад")
-      if (garden && p.garden) {
-        const g1 = p.garden.replace(/\s+/g, '').toLowerCase()
-        const g2 = garden.replace(/\s+/g, '').toLowerCase()
-        return g1.includes(g2) || g2.includes(g1)
-      }
-      return true
-    }).map((p: any) => ({
-      latin_full: p.latin_full,
-      garden: p.garden || '',
-      max_url: p.max_url || '',
-      date: p.date || '',
-    }))
-
-    if (matches.length > 0) return { latin: firstLine, garden, matches }
-  } catch {}
-  return null
-}
+// Duplicate detection — uses shared lib (catalog + recent publications + pending both bots)
 
 async function formatWithAI(rawText: string): Promise<string | null> {
   if (!GROQ_KEY) return null
@@ -366,25 +312,13 @@ async function process(update: any) {
       const photos = (target as any).photos || []
       log(`  origText for dupe check: "${origText.substring(0, 80)}..."`)
 
-      // Check for duplicates in catalog — try origText first, then AI-formatted text
-      let dupes = origText ? findDuplicates(origText) : null
-
-      // Try AI formatting
+      // AI formatting
       const formatted = origText ? await formatWithAI(origText) : null
 
-      // If origText didn't find dupes, try with AI-formatted text (has clean latin_full on first line)
-      if (!dupes && formatted) {
-        dupes = findDuplicates(formatted)
-      }
-      let dupeWarning = ''
-      if (dupes && dupes.matches.length > 0) {
-        const links = dupes.matches.map(m => {
-          const gardenDisplay = m.garden.replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2')
-          const link = m.max_url || ''
-          return `  • ${gardenDisplay || 'без сада'}, ${m.date}${link ? ` — ${link}` : ''}`
-        }).join('\n')
-        dupeWarning = `\n\n⚠️ ДУБЛИКАТ! Это растение уже есть в каталоге:\n${links}\n\nЕсли это обновлённые фото — публикуйте, при синхронизации старые фото заменятся на новые.`
-      }
+      // Triple duplicate check: raw text → AI text → catalog + recent publications + pending
+      let dupeResult = findAllDuplicates(origText)
+      if (!dupeResult && formatted) dupeResult = findAllDuplicates(formatted)
+      const dupeWarning = dupeResult ? formatDupeWarning(dupeResult.matches) : ''
 
       let askText: string
       if (formatted) {
@@ -425,6 +359,11 @@ async function process(update: any) {
       const pubAttachments = pending.photos.map((url: string) => ({ type: 'image', payload: { url } }))
       await send(PROTECTED_CATALOG_ID, publishText, pubAttachments.length ? pubAttachments : undefined)
       await send(ADMIN_CHAT_ID, `📢 Опубликовано в канале «Территория хвойных».\nАвтор заявки: ${pending.userName}`)
+
+      // Record in shared publication cache (cross-bot duplicate detection)
+      const parsed = parseLatinName(publishText)
+      if (parsed) addPublication(parsed.normalized, '', 'max')
+
       delete state.pendingPublish[replyMid]
       saveState(state)
       log(`Published to channel: ${publishText.substring(0, 50)} (${pending.photos.length} photos, from ${pending.userName})`)

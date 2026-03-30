@@ -417,7 +417,13 @@ function duplicateSlide() {
 }
 
 function deleteCurrentSlide() {
-  if (editConfig.value.slides.length <= 1) return
+  if (editConfig.value.slides.length <= 1) {
+    // Last slide — clear all slides (banner will be hidden)
+    if (!confirm('Удалить последний слайд? Баннер исчезнет со страницы.')) return
+    editConfig.value.slides = []
+    current.value = 0; selectedId.value = ''
+    return
+  }
   editConfig.value.slides.splice(current.value, 1)
   current.value = Math.min(current.value, editConfig.value.slides.length - 1); selectedId.value = ''
   nextTick(() => renderSlideToCanvas())
@@ -657,7 +663,7 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
               {{ i + 1 }}
             </button>
             <button class="slide-btn slide-add" @click="addSlide" title="Добавить слайд">+</button>
-            <button v-if="editConfig.slides.length > 1" class="slide-action" @click="deleteCurrentSlide" title="Удалить">
+            <button class="slide-action" @click="deleteCurrentSlide" title="Удалить">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
             </button>
             <button class="slide-action" @click="duplicateSlide" title="Дублировать">
@@ -727,6 +733,13 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
 
         <!-- ── Center: Canvas ── -->
         <main ref="canvasAreaRef" class="canvas-area">
+          <!-- Empty state when all slides deleted -->
+          <div v-if="editConfig.slides.length === 0" class="canvas-empty">
+            <p>Все слайды удалены. Баннер не будет отображаться.</p>
+            <button class="btn btn-save" @click="addSlide">Добавить слайд</button>
+            <p style="margin-top: 12px; font-size: 12px; color: #999;">Или нажмите «Сохранить» чтобы скрыть баннер.</p>
+          </div>
+          <template v-else>
           <div class="canvas-info">
             <span class="dims">{{ editVariant === 'desktop' ? 'Desktop' : 'Mobile' }} &mdash; {{ editConfig.designWidth }} &times; {{ Math.round(editConfig.canvasHeight) }}</span>
             <span class="zoom">{{ Math.round(editorScale * 100) }}%</span>
@@ -771,6 +784,7 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
             <div class="height-pill" />
           </div>
           <div class="height-label">{{ Math.round(editConfig.canvasHeight) }}px</div>
+          </template>
         </main>
 
         <!-- ── Right: Properties panel ── -->
@@ -992,6 +1006,7 @@ watch(() => editSlide.value ? [editSlide.value.bgType, editSlide.value.bgColor1,
 }
 
 /* ── Canvas Area ── */
+.canvas-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; color: #999; font-size: 14px; text-align: center; gap: 12px; }
 .canvas-area {
   flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: flex-start; padding: 24px 20px; overflow: auto; min-width: 0;

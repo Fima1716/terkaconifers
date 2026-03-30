@@ -225,6 +225,24 @@ function toggleConsent(gardenName: string) {
   gardenConsents.value[gardenName] = !gardenConsents.value[gardenName]
 }
 
+function selectAllConsents() {
+  for (const g of allGardens.value) gardenConsents.value[g.name] = true
+}
+
+function deselectAllConsents() {
+  for (const g of allGardens.value) gardenConsents.value[g.name] = false
+}
+
+function invertConsents() {
+  for (const g of allGardens.value) gardenConsents.value[g.name] = !gardenConsents.value[g.name]
+}
+
+function copyConsentLink(gardenName: string) {
+  const url = `${window.location.origin}/consent?garden=${encodeURIComponent(gardenName)}`
+  navigator.clipboard.writeText(url)
+  showMsg(`Ссылка скопирована: ${url}`)
+}
+
 async function applyConsents() {
   consentSaving.value = true
   try {
@@ -675,7 +693,7 @@ function formatDate(iso: string) {
           </div>
 
           <div class="panel">
-            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
               <input v-model="consentSearch" type="text" class="input" placeholder="Поиск сада..." style="flex: 1;">
               <button
                 class="btn-primary"
@@ -684,6 +702,13 @@ function formatDate(iso: string) {
               >
                 {{ consentSaving ? 'Сохранение...' : 'Применить' }}
               </button>
+            </div>
+
+            <!-- Quick action buttons -->
+            <div class="consent-actions">
+              <button class="btn-sm btn-green" @click="selectAllConsents">Выбрать все</button>
+              <button class="btn-sm btn-outline" @click="deselectAllConsents">Снять все</button>
+              <button class="btn-sm btn-outline" @click="invertConsents">Инвертировать</button>
             </div>
 
             <div class="consent-list">
@@ -701,6 +726,9 @@ function formatDate(iso: string) {
                   </span>
                   <span class="consent-name">{{ g.name }}</span>
                   <span class="consent-count">{{ g.count }} растений</span>
+                  <button class="consent-link-btn" title="Скопировать ссылку на согласие" @click.stop="copyConsentLink(g.name)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                  </button>
                 </label>
               </div>
             </div>
@@ -1216,6 +1244,14 @@ function formatDate(iso: string) {
 .consent-row { cursor: pointer; }
 .consent-warning { background: #fff3e0; border: 1px solid #ffcc02; border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #e65100; font-weight: 500; margin-bottom: 16px; }
 .consent-apply-bar { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; margin: 12px -16px -16px; background: #f5f5f5; border-top: 1px solid #ddd; border-radius: 0 0 12px 12px; font-size: 13px; color: #666; }
+.consent-actions { display: flex; gap: 6px; margin-bottom: 12px; }
+.btn-sm { padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.btn-green { background: #2e7d32; color: #fff; border: none; }
+.btn-green:hover { background: #1b5e20; }
+.btn-outline { background: none; border: 1.5px solid #ccc; color: #666; }
+.btn-outline:hover { border-color: #999; color: #333; }
+.consent-link-btn { background: none; border: none; color: #bbb; cursor: pointer; padding: 4px; border-radius: 4px; transition: all 0.15s; flex-shrink: 0; }
+.consent-link-btn:hover { color: #1a5632; background: rgba(26,86,50,0.08); }
 
 .pill { padding: 5px 14px; border-radius: 20px; border: none; font-size: 12px; font-weight: 700; cursor: pointer; }
 .pill-on { background: #e8f5e9; color: #2e7d32; }
