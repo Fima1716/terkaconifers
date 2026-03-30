@@ -13,7 +13,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
-import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName } from './lib/dupe-check.js'
+import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden } from './lib/dupe-check.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const STATE_FILE = resolve(ROOT, 'data/bot-state.json')
@@ -318,7 +318,8 @@ async function process(update: any) {
       // Triple duplicate check: raw text → AI text → catalog + recent publications + pending
       let dupeResult = findAllDuplicates(origText)
       if (!dupeResult && formatted) dupeResult = findAllDuplicates(formatted)
-      const dupeWarning = dupeResult ? formatDupeWarning(dupeResult.matches) : ''
+      const submittedGarden = formatted ? extractGarden(formatted) : ''
+      const dupeWarning = dupeResult ? formatDupeWarning(dupeResult.matches, submittedGarden) : ''
 
       let askText: string
       if (formatted) {

@@ -208,16 +208,57 @@ export function findAllDuplicates(text: string): { parsed: ParsedLatin; matches:
   return matches.length > 0 ? { parsed, matches } : null
 }
 
+// ── Extract garden from AI-formatted text ────────────────
+export function extractGarden(text: string): string {
+  // Garden is usually the line before hashtags, after metadata lines
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith('#')) continue
+    if (/^(Возраст|Размер|Оригинатор|Регион):/i.test(lines[i])) continue
+    if (/[А-Яа-яЁё]/.test(lines[i]) && !lines[i].includes(',') && i > 1) return lines[i]
+    break
+  }
+  return ''
+}
+
+function gardenMatch(g1: string, g2: string): boolean {
+  if (!g1 || !g2) return false
+  const n1 = g1.replace(/\s+/g, '').toLowerCase()
+  const n2 = g2.replace(/\s+/g, '').toLowerCase()
+  return n1.includes(n2) || n2.includes(n1)
+}
+
+function formatLine(m: DupeMatch): string {
+  const gardenDisplay = (m.garden || '').replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2')
+  const sourceTag = m.source === 'recent' ? ' [недавно]'
+    : m.source === 'pending' ? ' [ожидает]'
+    : ''
+  const link = m.max_url ? ` — ${m.max_url}` : ''
+  return `  • ${gardenDisplay || 'без сада'}, ${m.date}${link}${sourceTag}`
+}
+
 // ── Format dupe warning for admin chat ───────────────────
-export function formatDupeWarning(matches: DupeMatch[]): string {
+export function formatDupeWarning(matches: DupeMatch[], submittedGarden?: string): string {
   if (!matches.length) return ''
-  const lines = matches.map(m => {
-    const gardenDisplay = (m.garden || '').replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2')
-    const sourceTag = m.source === 'recent' ? ' [недавно опубликовано]'
-      : m.source === 'pending' ? ' [ожидает публикации]'
-      : ''
-    const link = m.max_url ? ` — ${m.max_url}` : ''
-    return `  • ${gardenDisplay || 'без сада'}, ${m.date}${link}${sourceTag}`
-  }).join('\n')
-  return `\n\n⚠️ ДУБЛИКАТ! Найдено ${matches.length} совпадений:\n${lines}\n\nЕсли это обновлённые фото — публикуйте, старые заменятся при синхронизации.`
+
+  const sameGarden = submittedGarden
+    ? matches.filter(m => gardenMatch(m.garden, submittedGarden))
+    : []
+  const otherGardens = submittedGarden
+    ? matches.filter(m => !gardenMatch(m.garden, submittedGarden))
+    : matches
+
+  let result = ''
+
+  if (sameGarden.length > 0) {
+    const lines = sameGarden.map(formatLine).join('\n')
+    result += `\n\n⚠️ ДУБЛИКАТ! Уже есть в этом саду:\n${lines}\n\nЕсли обновлённые фото — публикуйте, старые заменятся при синхронизации.`
+  }
+
+  if (otherGardens.length > 0) {
+    const lines = otherGardens.map(formatLine).join('\n')
+    result += `\n\nℹ️ Есть в других садах:\n${lines}`
+  }
+
+  return result
 }
