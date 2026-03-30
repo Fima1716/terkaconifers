@@ -60,20 +60,14 @@ async function submitConsent(agreed: boolean) {
             <p class="preview-count">
               В каталоге <strong>{{ preview.count }}</strong> {{ preview.count === 1 ? 'растение' : preview.count < 5 ? 'растения' : 'растений' }} из вашего сада
             </p>
-            <div class="preview-grid">
-              <div v-for="p in preview.plants" :key="p.latin_full" class="preview-plant">
-                <img v-if="p.thumb" :src="thumbWebpUrl(p.thumb)" :alt="p.latin_full" class="preview-img" loading="lazy">
-                <div v-else class="preview-img preview-img-empty">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M12 2L7 8h3l-4 6h3l-5 8h16l-5-8h3l-4-6h3z"/></svg>
-                </div>
-                <div class="preview-info">
-                  <span class="preview-name">{{ p.latin_full }}</span>
-                  <span v-if="p.species_ru" class="preview-species">{{ p.species_ru }}</span>
-                </div>
+            <div class="preview-mosaic">
+              <div v-for="p in preview.plants" :key="p.latin_full" class="preview-cell">
+                <img v-if="p.thumb" :src="thumbWebpUrl(p.thumb)" :alt="p.latin_full" loading="lazy">
+                <div v-else class="preview-empty" />
               </div>
             </div>
             <p v-if="preview.count > 12" class="preview-more">
-              и ещё {{ preview.count - 12 }}...
+              и ещё {{ preview.count - 12 }}
             </p>
           </div>
 
@@ -156,35 +150,30 @@ async function submitConsent(agreed: boolean) {
   padding: 10px 16px; background: #e8f5e9; border-radius: 10px;
 }
 
-/* Preview */
+/* Preview mosaic */
 .preview { margin-bottom: 20px; }
 .preview-count { font-size: 14px; color: #333; text-align: center; margin-bottom: 12px; }
 
-.preview-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+.preview-mosaic {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  border-radius: 12px;
+  overflow: hidden;
 }
-@media (min-width: 400px) { .preview-grid { grid-template-columns: repeat(4, 1fr); } }
 
-.preview-plant { text-align: center; }
-.preview-img {
-  width: 100%; aspect-ratio: 0.85;
-  border-radius: 8px; object-fit: cover;
-  background: #f5f7f5;
+.preview-cell {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: #f0f4f0;
 }
-.preview-img-empty {
-  display: flex; align-items: center; justify-content: center;
-  color: #ccc;
+.preview-cell img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
 }
-.preview-info { margin-top: 4px; }
-.preview-name {
-  display: block; font-size: 10px; font-weight: 600; color: #333;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  line-height: 1.3;
-}
-.preview-species {
-  display: block; font-size: 9px; color: #999; font-style: italic;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.preview-empty { width: 100%; height: 100%; background: #e8ece8; }
+
 .preview-more { font-size: 12px; color: #999; text-align: center; margin-top: 8px; }
 
 .consent-text { font-size: 14px; color: #333; line-height: 1.6; margin-bottom: 12px; }
