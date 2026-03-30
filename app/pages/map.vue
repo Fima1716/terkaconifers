@@ -95,8 +95,6 @@ async function initMap() {
   const L = (window as any).L
   if (!L) return
 
-  const russiaBounds = L.latLngBounds([41, 19], [72, 180])
-
   leafletMap = L.map(mapRef.value, {
     center: [58, 65],
     zoom: 4,
@@ -104,13 +102,13 @@ async function initMap() {
     maxZoom: 12,
     zoomControl: true,
     attributionControl: false,
-    maxBounds: russiaBounds,
-    maxBoundsViscosity: 1.0,
+    worldCopyJump: false,
+    maxBounds: [[-10, -30], [85, 200]],
+    maxBoundsViscosity: 0.8,
   })
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 12,
-    bounds: russiaBounds,
     noWrap: true,
   }).addTo(leafletMap)
 
