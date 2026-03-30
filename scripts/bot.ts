@@ -146,7 +146,7 @@ function findDuplicates(text: string): { latin: string; garden: string; matches:
 async function formatWithAI(rawText: string): Promise<string | null> {
   if (!GROQ_KEY) return null
   try {
-    const resp = await fetch('http://38.180.51.140:8443/v1/chat/completions', {
+    const resp = await fetch('http://185.192.21.148:9443/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
