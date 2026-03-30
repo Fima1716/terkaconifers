@@ -81,8 +81,8 @@ async function submit() {
           <input v-model="form.name" type="text" placeholder="Иван Петров">
         </div>
         <div class="gc-field">
-          <label>Как с вами связаться *</label>
-          <input v-model="form.contact" type="text" placeholder="Telegram, телефон или email">
+          <label>Ваш профиль в MAX *</label>
+          <input v-model="form.contact" type="text" placeholder="@username или ссылка max.ru/...">
         </div>
       </div>
 
