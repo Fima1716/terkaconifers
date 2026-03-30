@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
     const gardenNorm = garden.replace(/\s+/g, '').toLowerCase()
     const matches = catalog.filter((p: any) => {
       const g = (p.garden_display || p.garden || '').replace(/\s+/g, '').toLowerCase()
+      if (!g) return false
       return g.includes(gardenNorm) || gardenNorm.includes(g)
     })
 
