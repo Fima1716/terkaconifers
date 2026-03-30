@@ -32,7 +32,7 @@ if (existsSync(envPath)) {
 const TG_TOKEN = envVars.TG_BOT_TOKEN || ''
 const MAX_TOKEN = envVars.MAX_BOT_TOKEN || ''
 const ADMIN_CHAT_ID = envVars.ADMIN_CHAT_ID || '-72548188058297'
-const GROQ_KEY = envVars.GROQ_API_KEY || ''
+const AI_KEY = envVars.DEEPSEEK_API_KEY || envVars.GROQ_API_KEY || ''
 const PROTECTED_CATALOG_ID = '-71324192443065'
 
 const TG_API = `https://api.telegram.org/bot${TG_TOKEN}`
@@ -116,13 +116,13 @@ async function maxSend(chatId: string | number, text: string, attachments?: any[
 
 // ── AI formatting (same as Леший) ────────────────────────
 async function formatWithAI(rawText: string): Promise<string | null> {
-  if (!GROQ_KEY) return null
+  if (!AI_KEY) return null
   try {
-    const resp = await fetch('http://185.192.21.148:9443/v1/chat/completions', {
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${AI_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'deepseek-chat',
         temperature: 0.1,
         max_tokens: 500,
         messages: [
@@ -170,10 +170,10 @@ Genus species 'Cultivar'
         ],
       }),
     })
-    if (!resp.ok) { log(`Groq error: ${resp.status}`); return null }
+    if (!resp.ok) { log(`AI error: ${resp.status}`); return null }
     const data: any = await resp.json()
     return data.choices?.[0]?.message?.content?.trim() || null
-  } catch (e) { log(`Groq error: ${e}`); return null }
+  } catch (e) { log(`AI error: ${e}`); return null }
 }
 
 // Duplicate detection — uses shared lib (catalog + recent publications + pending)
@@ -543,7 +543,7 @@ async function pollMax() {
 log('🌲 TG-мост «Леший-TG» запускается...')
 log(`   TG бот: ${TG_TOKEN.substring(0, 10)}...`)
 log(`   MAX Корзина: ${ADMIN_CHAT_ID}`)
-log(`   AI: ${GROQ_KEY ? 'включен' : 'выключен'}`)
+log(`   AI: ${AI_KEY ? 'включен' : 'выключен'}`)
 
 // Run both polling loops in parallel
 Promise.all([pollTg(), pollMax()])

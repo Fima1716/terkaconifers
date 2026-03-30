@@ -31,7 +31,7 @@ if (existsSync(envPath)) {
 const TOKEN = env.MAX_BOT_TOKEN || ''
 const ADMIN_CHAT_ID = env.ADMIN_CHAT_ID || '-72548188058297'
 const BASE_URL = 'https://platform-api.max.ru'
-const GROQ_KEY = env.GROQ_API_KEY || ''
+const AI_KEY = env.DEEPSEEK_API_KEY || env.GROQ_API_KEY || ''
 
 const PROTECTED_CATALOG_ID = '-71324192443065'
 
@@ -90,13 +90,13 @@ async function answerCallback(cbId: string, note?: string) {
 // Duplicate detection — uses shared lib (catalog + recent publications + pending both bots)
 
 async function formatWithAI(rawText: string): Promise<string | null> {
-  if (!GROQ_KEY) return null
+  if (!AI_KEY) return null
   try {
-    const resp = await fetch('http://185.192.21.148:9443/v1/chat/completions', {
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${AI_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'deepseek-chat',
         temperature: 0.1,
         max_tokens: 500,
         messages: [
@@ -177,10 +177,10 @@ Pinus mugo 'Aurus'
         ],
       }),
     })
-    if (!resp.ok) { log(`Groq error: ${resp.status}`); return null }
+    if (!resp.ok) { log(`AI error: ${resp.status}`); return null }
     const data: any = await resp.json()
     return data.choices?.[0]?.message?.content?.trim() || null
-  } catch (e) { log(`Groq error: ${e}`); return null }
+  } catch (e) { log(`AI error: ${e}`); return null }
 }
 
 // ── Welcome ────────────────────────────────────────────────
