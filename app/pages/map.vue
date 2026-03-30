@@ -60,7 +60,7 @@ const gardens = computed<GardenPin[]>(() => {
   const map = new Map<string, { region: string; count: number; genera: Set<string> }>()
   for (const p of catalog.catalog) {
     const g = p.garden_display
-    if (!g) continue
+    if (!g || g === 'Частные сады' || g === 'Частный сад') continue
     if (!map.has(g)) map.set(g, { region: p.region_normalized || '', count: 0, genera: new Set() })
     const entry = map.get(g)!
     entry.count++
