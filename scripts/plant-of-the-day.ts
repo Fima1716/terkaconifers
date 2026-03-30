@@ -80,7 +80,7 @@ function formatPost(p: any): string {
   const lines: string[] = []
 
   // Header
-  lines.push('Растение дня')
+  lines.push('РАСТЕНИЕ ДНЯ')
   lines.push('')
 
   // Latin name + Russian name (same format as channel)
