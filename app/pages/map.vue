@@ -57,7 +57,7 @@ interface GardenPin {
 
 const gardens = computed<GardenPin[]>(() => {
   if (!catalog.isLoaded) return []
-  const map = new Map<string, { region: string; count: number; genera: Set<string> }>()
+  const map = new Map<string, { region: string; count: number; genera: Set<string>; displayName: string }>()
   for (const p of catalog.catalog) {
     const g = p.garden_display
     if (!g) continue
@@ -65,7 +65,7 @@ const gardens = computed<GardenPin[]>(() => {
     // "Частные сады" — split by region, each becomes separate pin
     const isPrivate = g === 'Частные сады' || g === 'Частный сад'
     const key = isPrivate ? `Частный сад|${region}` : g
-    if (!map.has(key)) map.set(key, { region, count: 0, genera: new Set(), displayName: isPrivate ? 'Частный сад' : g })
+    if (!map.has(key)) map.set(key, { region, count: 0, genera: new Set(), displayName: isPrivate ? 'Частный сад' : g } )
     const entry = map.get(key)!
     entry.count++
     if (p.genus_ru) entry.genera.add(p.genus_ru)
@@ -76,7 +76,7 @@ const gardens = computed<GardenPin[]>(() => {
     if (!coords) continue
     const jitter = (s: string) => { let h = 0; for (const c of s) h = ((h << 5) - h + c.charCodeAt(0)) | 0; return (h % 100) / 500 }
     pins.push({
-      name: (data as any).displayName || key,
+      name: data.displayName || key,
       region: data.region,
       count: data.count,
       coords: [coords[0] + jitter(key), coords[1] + jitter(key + 'x')],
@@ -95,15 +95,23 @@ async function initMap() {
   const L = (window as any).L
   if (!L) return
 
+  const russiaBounds = L.latLngBounds([41, 19], [72, 180])
+
   leafletMap = L.map(mapRef.value, {
-    center: [56, 60],
+    center: [58, 65],
     zoom: 4,
+    minZoom: 3,
+    maxZoom: 12,
     zoomControl: true,
     attributionControl: false,
+    maxBounds: russiaBounds,
+    maxBoundsViscosity: 1.0,
   })
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 12,
+    bounds: russiaBounds,
+    noWrap: true,
   }).addTo(leafletMap)
 
   // Custom green marker
