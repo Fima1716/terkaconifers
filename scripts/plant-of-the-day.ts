@@ -92,7 +92,11 @@ function formatPost(p: any): string {
   if (p.region) lines.push(p.region)
   if (p.age) lines.push(`Возраст: ${p.age}`)
   if (p.size) lines.push(`Размер: ${p.size}`)
-  if (p.originator) lines.push(`Оригинатор: ${p.originator}`)
+  if (p.originator) {
+    // Clean malformed "ы: Name" → "Name" (truncated "Оригинаторы:" from MAX parsing)
+    const orig = p.originator.replace(/^ы:\s*/i, '').trim()
+    if (orig) lines.push(`Оригинатор: ${orig}`)
+  }
 
   // Garden name (human-readable)
   const garden = (p.garden || '').replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2')
