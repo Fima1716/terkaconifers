@@ -109,7 +109,8 @@ function formatPost(p: any): string {
 
   // Footer
   lines.push('')
-  lines.push('terkaconifers.ru — каталог хвойных растений')
+  lines.push('terkaconifers.ru')
+  lines.push('Территория хвойных. Каталог')
 
   return lines.join('\n')
 }
