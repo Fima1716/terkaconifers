@@ -19,6 +19,8 @@ const photoCount = computed(() => {
 function formatNum(s: string) {
   return s.replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1 ')
 }
+
+const showBotModal = ref(false)
 </script>
 
 <template>
@@ -32,9 +34,9 @@ function formatNum(s: string) {
             <span class="hero-title-big">Территория <span class="hero-highlight">хвойных</span> Каталог</span>
           </h1>
           <p class="hero-brand">ТЕРКА</p>
-          <a href="https://max.ru/id592005855318_1_bot" target="_blank" class="hero-cta">
+          <button class="hero-cta" @click="showBotModal = true">
             Добавить своё растение
-          </a>
+          </button>
         </div>
 
         <!-- Right: about block -->
@@ -65,6 +67,39 @@ function formatNum(s: string) {
       </div>
     </div>
   </section>
+
+  <!-- Bot selection modal -->
+  <Teleport to="body">
+    <Transition name="modal">
+      <div v-if="showBotModal" class="bot-overlay" @click.self="showBotModal = false">
+        <div class="bot-modal">
+          <button class="bot-close" @click="showBotModal = false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <h2 class="bot-title">Добавить растение</h2>
+          <p class="bot-desc">Отправьте фото и описание через бота — мы добавим ваше растение в каталог</p>
+          <div class="bot-options">
+            <a href="https://t.me/LeshiyTerkaBot" target="_blank" class="bot-option" @click="showBotModal = false">
+              <img :src="pub('images/telegram-logo.svg')" width="36" height="36" alt="Telegram" class="bot-logo">
+              <div class="bot-option-info">
+                <span class="bot-option-name">Telegram</span>
+                <span class="bot-option-handle">@LeshiyTerkaBot</span>
+              </div>
+              <svg class="bot-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </a>
+            <a href="https://max.ru/id592005855318_1_bot" target="_blank" class="bot-option" @click="showBotModal = false">
+              <img :src="pub('images/max-logo.svg')" width="36" height="36" alt="MAX" class="bot-logo">
+              <div class="bot-option-info">
+                <span class="bot-option-name">MAX</span>
+                <span class="bot-option-handle">Леший</span>
+              </div>
+              <svg class="bot-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -202,4 +237,44 @@ function formatNum(s: string) {
   .about-text { font-size: 14px; }
   .about-feature { font-size: 14px; }
 }
+
+/* Bot modal */
+.bot-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.bot-modal {
+  background: #fff; border-radius: 20px;
+  max-width: 400px; width: 100%;
+  padding: 28px 24px; position: relative;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.15);
+}
+.bot-close { position: absolute; top: 16px; right: 16px; background: none; border: none; color: #999; cursor: pointer; }
+.bot-title { font-size: 20px; font-weight: 700; color: #1a1a1a; text-align: center; margin-bottom: 6px; }
+.bot-desc { font-size: 13px; color: #999; text-align: center; margin-bottom: 20px; line-height: 1.5; }
+
+.bot-options { display: flex; flex-direction: column; gap: 10px; }
+.bot-option {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; border-radius: 14px;
+  border: 1.5px solid #e8e8e8; background: #fff;
+  text-decoration: none; transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.bot-option:hover { border-color: #1a5632; background: #f5faf7; }
+.bot-logo { border-radius: 10px; flex-shrink: 0; }
+.bot-option-info { flex: 1; }
+.bot-option-name { display: block; font-size: 16px; font-weight: 700; color: #1a1a1a; }
+.bot-option-handle { display: block; font-size: 12px; color: #999; margin-top: 1px; }
+.bot-arrow { color: #ccc; flex-shrink: 0; transition: color 0.15s; }
+.bot-option:hover .bot-arrow { color: #1a5632; }
+
+.modal-enter-active { transition: opacity 0.2s; }
+.modal-enter-active .bot-modal { transition: transform 0.25s ease; }
+.modal-leave-active { transition: opacity 0.15s; }
+.modal-enter-from { opacity: 0; }
+.modal-enter-from .bot-modal { transform: translateY(16px) scale(0.97); }
+.modal-leave-to { opacity: 0; }
 </style>
