@@ -1,23 +1,26 @@
 <script setup lang="ts">
 import { useCatalogStore } from '~/stores/catalog'
+import { useAnimatedCount } from '~/composables/useAnimatedCount'
 
 const pub = usePublicUrl()
 const catalog = useCatalogStore()
 
 const plantCount = computed(() => catalog.catalog.length || 0)
-
 const gardenCount = computed(() => {
   if (!catalog.isLoaded) return 0
   return new Set(catalog.catalog.map(p => p.garden_display).filter(Boolean)).size
 })
-
 const photoCount = computed(() => {
   if (!catalog.isLoaded) return 0
   return catalog.catalog.reduce((sum, p) => sum + (p.photos?.length || 0), 0)
 })
 
-function formatNum(s: string) {
-  return s.replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1 ')
+const animPlants = useAnimatedCount(plantCount)
+const animGardens = useAnimatedCount(gardenCount)
+const animPhotos = useAnimatedCount(photoCount)
+
+function formatNum(n: number) {
+  return String(n).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1 ')
 }
 
 const showBotModal = ref(false)
@@ -50,15 +53,15 @@ const showBotModal = ref(false)
             </p>
             <div class="about-stats">
               <div class="about-stat">
-                <span class="about-stat-num">{{ formatNum(String(plantCount)) }}</span>
+                <span class="about-stat-num">{{ formatNum(animPlants) }}</span>
                 <span class="about-stat-label">сортов</span>
               </div>
               <div class="about-stat">
-                <span class="about-stat-num">{{ formatNum(String(gardenCount)) }}</span>
+                <span class="about-stat-num">{{ formatNum(animGardens) }}</span>
                 <span class="about-stat-label">садов</span>
               </div>
               <div class="about-stat">
-                <span class="about-stat-num">{{ formatNum(String(photoCount)) }}</span>
+                <span class="about-stat-num">{{ formatNum(animPhotos) }}</span>
                 <span class="about-stat-label">фото</span>
               </div>
             </div>

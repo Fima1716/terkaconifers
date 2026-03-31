@@ -1,11 +1,17 @@
 <script setup lang="ts">
+import { useCatalogStore } from '~/stores/catalog'
+import { useAnimatedCount } from '~/composables/useAnimatedCount'
+
 const pub = usePublicUrl()
-const { catalog } = useCatalogStore()
+const catalogStore = useCatalogStore()
+onMounted(() => { if (!catalogStore.isLoaded) catalogStore.loadCatalog() })
 
 useHead({ title: 'Ещё — Территория Хвойных' })
 
-const plantCount = computed(() => catalog.length || 0)
-const gardenCount = computed(() => new Set(catalog.map(p => p.garden_display).filter(Boolean)).size)
+const plantCount = computed(() => catalogStore.catalog.length || 0)
+const gardenCount = computed(() => new Set(catalogStore.catalog.map(p => p.garden_display).filter(Boolean)).size)
+const animPlants = useAnimatedCount(plantCount)
+const animGardens = useAnimatedCount(gardenCount)
 </script>
 
 <template>
@@ -13,9 +19,9 @@ const gardenCount = computed(() => new Set(catalog.map(p => p.garden_display).fi
     <!-- Stats banner -->
     <div class="stats-banner">
       <div class="stats-row">
-        <div class="stat"><span class="stat-num">{{ plantCount }}</span><span class="stat-label">растений</span></div>
+        <div class="stat"><span class="stat-num">{{ animPlants }}</span><span class="stat-label">растений</span></div>
         <div class="stat-div" />
-        <div class="stat"><span class="stat-num">{{ gardenCount }}</span><span class="stat-label">садов</span></div>
+        <div class="stat"><span class="stat-num">{{ animGardens }}</span><span class="stat-label">садов</span></div>
       </div>
     </div>
 
