@@ -9,7 +9,7 @@ const tabs = [
   { path: '/favorites', icon: 'heart', label: 'Избранное' },
   { path: '/catalog', icon: 'catalog', label: 'Каталог' },
   { path: '/gardens', icon: 'gardens', label: 'Сады' },
-  { path: '/more', icon: 'more', label: 'Профиль' },
+  { path: '/more', icon: 'more', label: 'Ещё' },
 ]
 
 function isActive(path: string) {
@@ -47,9 +47,9 @@ function isActive(path: string) {
         <svg v-if="tab.icon === 'gardens'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22">
           <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
         </svg>
-        <!-- Profile/More -->
+        <!-- More -->
         <svg v-if="tab.icon === 'more'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22">
-          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+          <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
         </svg>
       </span>
       <span class="tab-label">{{ tab.label }}</span>
