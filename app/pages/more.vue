@@ -12,9 +12,6 @@ const gardenCount = computed(() => new Set(catalog.map(p => p.garden_display).fi
   <div class="more-page container">
     <!-- Stats banner -->
     <div class="stats-banner">
-      <div class="stats-logo">
-        <img :src="pub('images/logo.png')" alt="ТЕРКА" class="stats-logo-img">
-      </div>
       <div class="stats-row">
         <div class="stat"><span class="stat-num">{{ plantCount }}</span><span class="stat-label">растений</span></div>
         <div class="stat-div" />
@@ -105,7 +102,6 @@ const gardenCount = computed(() => new Set(catalog.map(p => p.garden_display).fi
   background: var(--bg-alt); border-radius: 16px;
   margin-bottom: 24px;
 }
-.stats-logo-img { height: 48px; width: auto; margin-bottom: 12px; }
 .stats-row { display: flex; justify-content: center; gap: 24px; align-items: center; }
 .stat { display: flex; flex-direction: column; align-items: center; }
 .stat-num { font-size: 20px; font-weight: 700; color: var(--primary); }

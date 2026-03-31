@@ -49,7 +49,7 @@ function isActive(path: string) {
         </svg>
         <!-- More -->
         <svg v-if="tab.icon === 'more'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22">
-          <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+          <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
         </svg>
       </span>
       <span class="tab-label">{{ tab.label }}</span>
