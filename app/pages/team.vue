@@ -103,7 +103,7 @@ function removeLink(index: number) {
 }
 
 function triggerPhotoInput(event: Event) {
-  const section = (event.currentTarget as HTMLElement).parentElement
+  const section = (event.currentTarget as HTMLElement).closest('.edit-photo-section')
   const input = section?.querySelector('input[type="file"]') as HTMLInputElement
   input?.click()
 }
@@ -205,8 +205,8 @@ function editPhotoDisplayUrl(): string {
       <!-- Add new member form -->
       <article v-if="editingId === '__new__'" class="member-card member-card--editing">
         <div class="edit-form">
-          <div class="edit-photo-section">
-            <div class="edit-photo-circle" @click="triggerPhotoInput($event)">
+          <div class="edit-photo-section" @click="triggerPhotoInput($event)">
+            <div class="edit-photo-circle">
               <img v-if="editPhotoPreview" :src="editPhotoPreview" alt="" />
               <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36">
                 <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
@@ -346,8 +346,8 @@ function editPhotoDisplayUrl(): string {
           <!-- Edit mode -->
           <template v-else>
             <div class="edit-form">
-              <div class="edit-photo-section">
-                <div class="edit-photo-circle" @click="triggerPhotoInput($event)">
+              <div class="edit-photo-section" @click="triggerPhotoInput($event)">
+                <div class="edit-photo-circle">
                   <img v-if="editPhotoDisplayUrl()" :src="editPhotoDisplayUrl()" alt="" />
                   <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36">
                     <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
@@ -663,6 +663,7 @@ function editPhotoDisplayUrl(): string {
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  cursor: pointer;
 }
 .edit-photo-circle {
   width: 100px;
