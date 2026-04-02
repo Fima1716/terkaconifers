@@ -82,6 +82,60 @@ function linkPlaceholder(type: string): string {
   return LINK_TYPES.find(t => t.value === type)?.placeholder || 'URL'
 }
 
+// Auto-linkify URLs in bio text + sanitize HTML
+function linkifyBio(text: string): string {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return escaped.replace(
+    /(https?:\/\/[^\s<,)]+)/g,
+    '<a href="$1" target="_blank" rel="noopener" class="bio-link">$1</a>',
+  )
+}
+
+// Bio expand/collapse per member
+const expandedBios = ref<Set<string>>(new Set())
+const BIO_MAX_LENGTH = 200
+
+function isBioLong(member: TeamMember): boolean {
+  return (member.bio || '').length > BIO_MAX_LENGTH
+}
+
+function displayBio(member: TeamMember): string {
+  const bio = member.bio || ''
+  if (!isBioLong(member) || expandedBios.value.has(member.id)) {
+    return linkifyBio(bio)
+  }
+  const truncated = bio.slice(0, BIO_MAX_LENGTH).replace(/\s+\S*$/, '')
+  return linkifyBio(truncated) + '...'
+}
+
+function toggleBio(memberId: string) {
+  if (expandedBios.value.has(memberId)) {
+    expandedBios.value.delete(memberId)
+  } else {
+    expandedBios.value.add(memberId)
+  }
+}
+
+// Extract URLs from bio that aren't already in links array
+function allMemberLinks(member: TeamMember): TeamLink[] {
+  const existing = member.links || []
+  const existingUrls = new Set(existing.map(l => l.url))
+  const bioUrls = (member.bio || '').match(/https?:\/\/[^\s<,)]+/g) || []
+  const extra: TeamLink[] = []
+  for (const url of bioUrls) {
+    if (existingUrls.has(url)) continue
+    existingUrls.add(url)
+    if (url.includes('t.me/')) extra.push({ type: 'telegram', url })
+    else if (url.includes('vk.com/') || url.includes('vk.ru/')) extra.push({ type: 'vk', url })
+    else if (url.includes('max.im/')) extra.push({ type: 'max', url })
+    else extra.push({ type: 'site', url })
+  }
+  return [...existing, ...extra]
+}
+
 function startEdit(member: TeamMember) {
   editingId.value = member.id
   editForm.id = member.id
@@ -314,15 +368,23 @@ function editPhotoDisplayUrl(): string {
             <div class="card-body">
               <h3 class="card-name">{{ member.name }}</h3>
               <span class="card-role">{{ member.role }}</span>
-              <p class="card-bio">{{ member.bio }}</p>
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <p class="card-bio" v-html="displayBio(member)" />
+              <button
+                v-if="isBioLong(member)"
+                class="btn-bio-toggle"
+                @click="toggleBio(member.id)"
+              >
+                {{ expandedBios.has(member.id) ? 'Свернуть' : 'Подробнее' }}
+              </button>
 
               <div v-if="member.tags?.length" class="card-tags">
                 <span v-for="tag in member.tags" :key="tag" class="tag-chip">{{ tag }}</span>
               </div>
 
-              <div v-if="member.links?.length" class="card-links">
+              <div v-if="allMemberLinks(member).length" class="card-links">
                 <a
-                  v-for="link in member.links"
+                  v-for="link in allMemberLinks(member)"
                   :key="link.url"
                   :href="linkHref(link)"
                   :target="link.type === 'email' ? undefined : '_blank'"
@@ -648,6 +710,29 @@ function editPhotoDisplayUrl(): string {
   line-height: 1.7;
   color: var(--text-secondary);
   margin: 16px 0 0;
+  word-break: break-word;
+}
+.card-bio :deep(.bio-link) {
+  color: var(--primary);
+  text-decoration: none;
+  word-break: break-all;
+}
+.card-bio :deep(.bio-link:hover) {
+  text-decoration: underline;
+}
+.btn-bio-toggle {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 4px;
+  transition: opacity 0.15s;
+}
+.btn-bio-toggle:hover {
+  opacity: 0.7;
 }
 
 /* ═══════ Tags ═══════ */
