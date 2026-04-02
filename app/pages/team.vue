@@ -43,7 +43,6 @@ const editForm = reactive({
 })
 const editPhotoFile = ref<File | null>(null)
 const editPhotoPreview = ref<string | null>(null)
-const editPhotoInput = ref<HTMLInputElement | null>(null)
 
 async function loadTeam() {
   loading.value = true
@@ -101,6 +100,12 @@ function addLink() {
 
 function removeLink(index: number) {
   editForm.links.splice(index, 1)
+}
+
+function triggerPhotoInput(event: Event) {
+  const section = (event.currentTarget as HTMLElement).parentElement
+  const input = section?.querySelector('input[type="file"]') as HTMLInputElement
+  input?.click()
 }
 
 function handlePhotoSelect(e: Event) {
@@ -201,14 +206,14 @@ function editPhotoDisplayUrl(): string {
       <article v-if="editingId === '__new__'" class="member-card member-card--editing">
         <div class="edit-form">
           <div class="edit-photo-section">
-            <div class="edit-photo-circle" @click="editPhotoInput?.click()">
+            <div class="edit-photo-circle" @click="triggerPhotoInput($event)">
               <img v-if="editPhotoPreview" :src="editPhotoPreview" alt="" />
               <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36">
                 <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
                 <circle cx="12" cy="13" r="4"/>
               </svg>
             </div>
-            <input ref="editPhotoInput" type="file" accept="image/*" style="display:none" @change="handlePhotoSelect" />
+            <input type="file" accept="image/*" style="display:none" @change="handlePhotoSelect" />
             <span class="edit-photo-hint">Нажмите для загрузки</span>
           </div>
 
@@ -342,14 +347,14 @@ function editPhotoDisplayUrl(): string {
           <template v-else>
             <div class="edit-form">
               <div class="edit-photo-section">
-                <div class="edit-photo-circle" @click="editPhotoInput?.click()">
+                <div class="edit-photo-circle" @click="triggerPhotoInput($event)">
                   <img v-if="editPhotoDisplayUrl()" :src="editPhotoDisplayUrl()" alt="" />
                   <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36">
                     <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
                     <circle cx="12" cy="13" r="4"/>
                   </svg>
                 </div>
-                <input ref="editPhotoInput" type="file" accept="image/*" style="display:none" @change="handlePhotoSelect" />
+                <input type="file" accept="image/*" style="display:none" @change="handlePhotoSelect" />
                 <span class="edit-photo-hint">Нажмите для замены</span>
               </div>
 
