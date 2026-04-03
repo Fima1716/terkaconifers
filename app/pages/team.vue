@@ -79,7 +79,7 @@ async function loadTeam() {
   loading.value = true
   try {
     const data = await $fetch<{ members: TeamMember[] }>('/api/team')
-    members.value = shuffleMembers(data.members || [])
+    members.value = data.members || []
     if (members.value.length && !activeId.value) {
       activeId.value = members.value[0].id
     }
@@ -90,6 +90,14 @@ async function loadTeam() {
 }
 
 await loadTeam()
+
+// Shuffle only on client to avoid SSR/client hydration mismatch
+onMounted(() => {
+  if (members.value.length > 1) {
+    members.value = shuffleMembers(members.value)
+    activeId.value = members.value[0].id
+  }
+})
 
 function photoUrl(member: TeamMember): string {
   if (member.photo) return `/api/team-photo/${member.photo}`
