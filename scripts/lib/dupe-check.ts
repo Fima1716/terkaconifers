@@ -101,14 +101,17 @@ export function parseLatinName(text: string): ParsedLatin | null {
 }
 
 // ── Recent publications cache ────────────────────────────
-interface Publication {
+export interface Publication {
   latin: string       // normalized latin
   garden: string
   date: string        // ISO
   source: string      // 'max' | 'tg'
+  channelMid?: string // message ID in the catalog channel
+  text?: string       // first line of published text (for display)
+  author?: string     // who submitted
 }
 
-function loadPublications(): Publication[] {
+export function loadPublications(): Publication[] {
   if (!existsSync(PUBLICATIONS_PATH)) return []
   try {
     const data = JSON.parse(readFileSync(PUBLICATIONS_PATH, 'utf-8'))
@@ -116,12 +119,24 @@ function loadPublications(): Publication[] {
   } catch { return [] }
 }
 
-export function addPublication(latin: string, garden: string, source: string) {
+export function addPublication(latin: string, garden: string, source: string, extra?: { channelMid?: string; text?: string; author?: string }) {
   const pubs = loadPublications()
-  pubs.push({ latin: latin.toLowerCase(), garden, date: new Date().toISOString(), source })
+  pubs.push({
+    latin: latin.toLowerCase(), garden, date: new Date().toISOString(), source,
+    channelMid: extra?.channelMid, text: extra?.text, author: extra?.author,
+  })
   // Keep last 500
   const trimmed = pubs.slice(-500)
   writeFileSync(PUBLICATIONS_PATH, JSON.stringify({ entries: trimmed }, null, 2))
+}
+
+export function removePublication(channelMid: string): boolean {
+  const pubs = loadPublications()
+  const idx = pubs.findIndex(p => p.channelMid === channelMid)
+  if (idx < 0) return false
+  pubs.splice(idx, 1)
+  writeFileSync(PUBLICATIONS_PATH, JSON.stringify({ entries: pubs }, null, 2))
+  return true
 }
 
 // ── Load pending from both bots ──────────────────────────

@@ -13,7 +13,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
-import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden } from './lib/dupe-check.js'
+import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden, loadPublications, removePublication } from './lib/dupe-check.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const STATE_FILE = resolve(ROOT, 'data/bot-state.json')
@@ -85,6 +85,13 @@ async function answerCallback(cbId: string, note?: string) {
   await fetch(`${BASE_URL}/answers/callback?callback_id=${cbId}`, {
     method: 'POST', headers: H, body: JSON.stringify(note ? { notification: note } : {}),
   })
+}
+
+async function deleteMessage(mid: string): Promise<boolean> {
+  const resp = await fetch(`${BASE_URL}/messages?message_id=${mid}`, {
+    method: 'DELETE', headers: H,
+  })
+  return resp.ok
 }
 
 // Duplicate detection — uses shared lib (catalog + recent publications + pending both bots)
@@ -275,6 +282,58 @@ async function process(update: any) {
   // ADMIN CHAT
   // ════════════════════════════════════════════
   if (String(chatId) === String(ADMIN_CHAT_ID)) {
+    // /last — show recent publications
+    if (text === '/last' || text.startsWith('/last ')) {
+      const count = parseInt(text.split(/\s+/)[1]) || 10
+      const pubs = loadPublications()
+      if (!pubs.length) {
+        await send(ADMIN_CHAT_ID, '📭 Нет недавних публикаций.')
+        return
+      }
+      const showing = Math.min(count, pubs.length, 20)
+      const reversed = [...pubs].reverse().slice(0, showing)
+      let msg = `📋 Последние ${showing} публикаций:\n\n`
+      reversed.forEach((p, i) => {
+        const date = p.date?.slice(0, 10) || '?'
+        const title = p.text || p.latin || '?'
+        const author = p.author ? ` (${p.author})` : ''
+        const hasMid = p.channelMid ? '🗑' : '⚠️'
+        msg += `${hasMid} ${i + 1}. ${title}${author} — ${date}\n`
+      })
+      msg += `\n🗑 = можно удалить командой /удалить N\n⚠️ = нет ID, удалить нельзя`
+      await send(ADMIN_CHAT_ID, msg)
+      return
+    }
+
+    // /удалить N — works without reply too
+    if (text.startsWith('/удалить') || text.startsWith('/delete')) {
+      const num = parseInt(text.split(/\s+/)[1])
+      if (!num || num < 1) {
+        await send(ADMIN_CHAT_ID, '⚠️ Укажите номер из списка /last. Пример: /удалить 3')
+        return
+      }
+      const pubs = loadPublications()
+      const reversed = [...pubs].reverse()
+      const pub = reversed[num - 1]
+      if (!pub) {
+        await send(ADMIN_CHAT_ID, `⚠️ Нет публикации №${num}. Всего: ${pubs.length}`)
+        return
+      }
+      if (!pub.channelMid) {
+        await send(ADMIN_CHAT_ID, `⚠️ У публикации «${pub.text || pub.latin}» нет ID сообщения в канале — удалить автоматически нельзя.\nОна была опубликована до введения модерации.`)
+        return
+      }
+      const ok = await deleteMessage(pub.channelMid)
+      if (ok) {
+        removePublication(pub.channelMid)
+        await send(ADMIN_CHAT_ID, `✅ Удалено из канала: ${pub.text || pub.latin}`)
+        log(`Deleted from channel: ${pub.text} (mid=${pub.channelMid}, by ${name})`)
+      } else {
+        await send(ADMIN_CHAT_ID, `❌ Не удалось удалить сообщение. Возможно, оно уже удалено.`)
+      }
+      return
+    }
+
     const replyMid = msg.link?.type === 'reply' ? msg.link.message?.mid : undefined
     if (!replyMid) return
 
@@ -358,12 +417,14 @@ async function process(update: any) {
       const publishText = isApprove && pending.aiText ? pending.aiText : text
 
       const pubAttachments = pending.photos.map((url: string) => ({ type: 'image', payload: { url } }))
-      await send(PROTECTED_CATALOG_ID, publishText, pubAttachments.length ? pubAttachments : undefined)
+      const pubResult: any = await send(PROTECTED_CATALOG_ID, publishText, pubAttachments.length ? pubAttachments : undefined)
+      const channelMid = pubResult?.message?.body?.mid || ''
       await send(ADMIN_CHAT_ID, `📢 Опубликовано в канале «Территория хвойных».\nАвтор заявки: ${pending.userName}`)
 
       // Record in shared publication cache (cross-bot duplicate detection)
       const parsed = parseLatinName(publishText)
-      if (parsed) addPublication(parsed.normalized, '', 'max')
+      const firstLine = publishText.split('\n').filter(Boolean)[0] || ''
+      if (parsed) addPublication(parsed.normalized, '', 'max', { channelMid, text: firstLine, author: pending.userName })
 
       delete state.pendingPublish[replyMid]
       saveState(state)
