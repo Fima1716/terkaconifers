@@ -237,7 +237,9 @@ async function sharePlant() {
       <!-- Info -->
       <div class="plant-info">
         <h1 class="plant-latin">{{ plant.latin_full }}</h1>
-        <p v-if="plant.species_ru" class="plant-ru">{{ plant.species_ru }}</p>
+        <p v-if="plant.species_ru" class="plant-ru">
+          {{ plant.species_ru }}<template v-if="plant.cultivar_ru"> '{{ plant.cultivar_ru }}'</template>
+        </p>
 
         <!-- Tags -->
         <div class="plant-tags">

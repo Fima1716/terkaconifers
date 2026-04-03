@@ -68,7 +68,9 @@ async function resolveRegionWithAI(rawRegion: string): Promise<{ region: string;
     })
     if (!resp.ok) return null
     const data: any = await resp.json()
-    const text = data.choices?.[0]?.message?.content?.trim() || ''
+    let text = data.choices?.[0]?.message?.content?.trim() || ''
+    // Strip markdown code fences if present (```json ... ```)
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
     const parsed = JSON.parse(text)
     if (parsed.region) {
       const result = { region: parsed.region, district: parsed.district || '' }
@@ -111,6 +113,7 @@ interface EnrichedPlant extends RawPlant {
   is_new: boolean
   species_full: string
   species_ru: string
+  cultivar_ru: string
   form: string | null
   form_ru: string | null
   color: string | null
@@ -498,20 +501,24 @@ function extractCultivar(line: string): string {
 
 // ── Species name enrichment ──────────────────────────────────
 
-function enrichSpecies(plant: RawPlant): { species_full: string; species_ru: string } {
+function enrichSpecies(plant: RawPlant): { species_full: string; species_ru: string; cultivar_ru: string } {
   const species_full = plant.species
     ? `${plant.genus} ${plant.species}`
     : plant.genus
 
-  let species_ru = plant.name_ru || plant.genus_ru || ''
+  const nameRu = plant.name_ru || plant.genus_ru || ''
 
-  // Remove cultivar names in any quotes (ASCII + Unicode curly)
-  species_ru = species_ru
+  // Extract Russian cultivar from quotes (e.g. "Ель сибирская 'Красна Девица'" → "Красна Девица")
+  const cultivarMatch = nameRu.match(/[\u2018\u2019\u201C\u201D'"`]([^\u2018\u2019\u201C\u201D'"`]+)[\u2018\u2019\u201C\u201D'"`]/)
+  const cultivar_ru = cultivarMatch ? cultivarMatch[1].trim() : ''
+
+  // Remove cultivar names in any quotes to get clean species_ru
+  let species_ru = nameRu
     .replace(/[\u2018\u2019\u201C\u201D'"`][^\u2018\u2019\u201C\u201D'"`]+[\u2018\u2019\u201C\u201D'"`]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 
-  return { species_full, species_ru }
+  return { species_full, species_ru, cultivar_ru }
 }
 
 // ── Main enrichment ──────────────────────────────────────────
@@ -638,7 +645,7 @@ async function enrich() {
     const { display: garden_display, type: garden_type, type_ru: garden_type_ru } = parseGarden(gardenNormalized)
     const { min: age_min, max: age_max, display: age_display } = parseAge(plant.age)
     const size_display = (plant.size || '').replace(/\.$/, '').trim()
-    const { species_full, species_ru } = enrichSpecies(plant)
+    const { species_full, species_ru, cultivar_ru } = enrichSpecies(plant)
 
     const is_russian_enriched = plant.is_russian ||
       plant.hashtags.includes('Российский_сорт') ||
@@ -670,6 +677,7 @@ async function enrich() {
       garden: gardenNormalized,
       species_full,
       species_ru,
+      cultivar_ru,
       form,
       form_ru,
       color,

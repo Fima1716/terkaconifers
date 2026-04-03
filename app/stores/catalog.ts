@@ -17,6 +17,7 @@ export interface Plant {
   genus_ru: string
   species: string
   cultivar: string
+  cultivar_ru: string
   latin_full: string
   photos: string[]
   thumbs: string[]
