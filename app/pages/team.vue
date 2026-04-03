@@ -64,11 +64,22 @@ const editForm = reactive({
 const editPhotoFile = ref<File | null>(null)
 const editPhotoPreview = ref<string | null>(null)
 
+function shuffleMembers(list: TeamMember[]): TeamMember[] {
+  // Русинов always first, the rest randomized
+  const first = list.find(m => m.id === '1')
+  const rest = list.filter(m => m.id !== '1')
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[rest[i], rest[j]] = [rest[j], rest[i]]
+  }
+  return first ? [first, ...rest] : rest
+}
+
 async function loadTeam() {
   loading.value = true
   try {
     const data = await $fetch<{ members: TeamMember[] }>('/api/team')
-    members.value = data.members || []
+    members.value = shuffleMembers(data.members || [])
     if (members.value.length && !activeId.value) {
       activeId.value = members.value[0].id
     }
