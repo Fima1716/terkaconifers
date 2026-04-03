@@ -19,6 +19,7 @@ interface TeamMember {
   photo: string
   links: TeamLink[]
   tags: string[]
+  garden?: string  // garden_display name for link to /garden/{name}
 }
 
 const LINK_TYPES = [
@@ -431,6 +432,19 @@ function editPhotoDisplayUrl(): string {
               </a>
             </div>
 
+            <!-- Garden link -->
+            <NuxtLink
+              v-if="activeMember.garden"
+              :to="`/garden/${encodeURIComponent(activeMember.garden)}`"
+              class="btn-garden"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M12 22c-4.97 0-9-2.69-9-6v-2c0-3.31 4.03-6 9-6s9 2.69 9 6v2c0 3.31-4.03 6-9 6z" />
+                <path d="M12 2C9.24 2 7 4.24 7 7c0 2.1 1.3 3.9 3.14 4.65.6.23 1.23.35 1.86.35s1.26-.12 1.86-.35C15.7 10.9 17 9.1 17 7c0-2.76-2.24-5-5-5z" />
+              </svg>
+              Посмотреть сад
+            </NuxtLink>
+
             <!-- Admin buttons -->
             <div v-if="auth.isSuperAdmin" class="profile-admin">
               <button class="btn-edit" @click="startEdit(activeMember)">
@@ -769,6 +783,27 @@ function editPhotoDisplayUrl(): string {
 .profile-link-btn--max:hover { color: #5B3CDB; border-color: #5B3CDB; background: rgba(91,60,219,0.05); }
 .profile-link-btn--email:hover { color: var(--primary); border-color: var(--primary); background: rgba(26,86,50,0.04); }
 .profile-link-btn--site:hover { color: var(--accent); border-color: var(--accent); background: rgba(77,184,164,0.05); }
+
+/* ═══════ Garden button ═══════ */
+.btn-garden {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-light));
+  color: #fff;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.25s;
+  box-shadow: 0 4px 14px rgba(26, 86, 50, 0.2);
+}
+.btn-garden:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(26, 86, 50, 0.3);
+}
 
 /* ═══════ Profile admin ═══════ */
 .profile-admin {
