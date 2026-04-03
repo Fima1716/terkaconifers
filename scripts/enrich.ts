@@ -296,12 +296,17 @@ async function normalizeRegion(region: string): Promise<{ normalized: string; di
         if (DISTRICT_NOISE.test(district) || district.toLowerCase() === canonical.toLowerCase()) {
           district = ''
         }
+        // If no meaningful district, ask AI to fill it in
+        if (!district) {
+          const aiResult = await resolveRegionWithAI(region)
+          if (aiResult?.district) district = aiResult.district
+        }
         return { normalized: canonical, district }
       }
     }
   }
 
-  // Fallback: ask AI to determine the region
+  // Fallback: ask AI to determine the region + district
   const aiResult = await resolveRegionWithAI(region)
   if (aiResult && aiResult.region) {
     return { normalized: aiResult.region, district: aiResult.district }
