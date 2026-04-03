@@ -13,6 +13,76 @@ const ROOT = resolve(import.meta.dirname, '..')
 const RAW_DIR = resolve(ROOT, 'data/raw')
 const OUT_DIR = resolve(ROOT, 'data')
 
+// ── .env loading ──────────────────────────────────────────────
+const env: Record<string, string> = {}
+const envPath = resolve(ROOT, '.env')
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
+    const m = line.match(/^([^#=]+)=(.*)$/)
+    if (m) env[m[1].trim()] = m[2].trim()
+  }
+}
+const AI_KEY = env.DEEPSEEK_API_KEY || ''
+
+// ── Region cache (AI-resolved locations) ──────────────────────
+const REGION_CACHE_PATH = resolve(OUT_DIR, 'region-cache.json')
+
+function loadRegionCache(): Record<string, { region: string; district: string }> {
+  if (!existsSync(REGION_CACHE_PATH)) return {}
+  try { return JSON.parse(readFileSync(REGION_CACHE_PATH, 'utf-8')) } catch { return {} }
+}
+
+function saveRegionCache(cache: Record<string, { region: string; district: string }>) {
+  writeFileSync(REGION_CACHE_PATH, JSON.stringify(cache, null, 2))
+}
+
+const regionCache = loadRegionCache()
+
+async function resolveRegionWithAI(rawRegion: string): Promise<{ region: string; district: string } | null> {
+  if (!AI_KEY || !rawRegion) return null
+  const cacheKey = rawRegion.toLowerCase().trim()
+  if (regionCache[cacheKey]) return regionCache[cacheKey]
+
+  try {
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${AI_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        temperature: 0,
+        max_tokens: 100,
+        messages: [{
+          role: 'system',
+          content: `Ты определяешь субъект РФ по названию населённого пункта или локации.
+Ответь СТРОГО в формате JSON: {"region": "Название области/края/республики", "district": "город/район"}
+Примеры:
+"г.Комсомольск-на-Амуре" → {"region": "Хабаровский край", "district": "Комсомольск-на-Амуре"}
+"Раменский р-н" → {"region": "Московская область", "district": "Раменский район"}
+"Минск" → {"region": "Беларусь", "district": "Минск"}
+Если не знаешь — ответь {"region": "", "district": ""}. Только JSON, ничего больше.`,
+        }, {
+          role: 'user',
+          content: rawRegion,
+        }],
+      }),
+    })
+    if (!resp.ok) return null
+    const data: any = await resp.json()
+    const text = data.choices?.[0]?.message?.content?.trim() || ''
+    const parsed = JSON.parse(text)
+    if (parsed.region) {
+      const result = { region: parsed.region, district: parsed.district || '' }
+      regionCache[cacheKey] = result
+      saveRegionCache(regionCache)
+      console.log(`  🤖 AI: "${rawRegion}" → ${result.region}, ${result.district}`)
+      return result
+    }
+  } catch (e) {
+    console.log(`  ⚠️ AI region resolve failed for "${rawRegion}": ${e}`)
+  }
+  return null
+}
+
 // ── Types ────────────────────────────────────────────────────
 
 interface RawPlant {
@@ -211,18 +281,23 @@ const REGION_RULES: [string, RegExp[]][] = [
   ['Алтайский край', [/алтай/i]],
 ]
 
-function normalizeRegion(region: string): { normalized: string; district: string } {
+async function normalizeRegion(region: string): Promise<{ normalized: string; district: string }> {
   if (!region) return { normalized: '', district: '' }
 
   for (const [canonical, patterns] of REGION_RULES) {
     for (const pat of patterns) {
       if (pat.test(region)) {
-        // Try to extract district
         const parts = region.split(',').map(s => s.trim())
         const district = parts.length > 1 ? parts.slice(1).join(', ').replace(/\.$/, '').trim() : ''
         return { normalized: canonical, district }
       }
     }
+  }
+
+  // Fallback: ask AI to determine the region
+  const aiResult = await resolveRegionWithAI(region)
+  if (aiResult && aiResult.region) {
+    return { normalized: aiResult.region, district: aiResult.district }
   }
 
   return { normalized: region.replace(/\.$/, '').trim(), district: '' }
@@ -429,7 +504,7 @@ function enrichSpecies(plant: RawPlant): { species_full: string; species_ru: str
 
 // ── Main enrichment ──────────────────────────────────────────
 
-function enrich() {
+async function enrich() {
   console.log('📖 Reading raw data...')
   const catalog: RawPlant[] = JSON.parse(readFileSync(resolve(RAW_DIR, 'catalog.json'), 'utf-8'))
   const genera = JSON.parse(readFileSync(resolve(RAW_DIR, 'genera.json'), 'utf-8'))
@@ -515,7 +590,7 @@ function enrich() {
   for (const plant of catalog) {
     const g = normalizeGarden(plant.garden)
     if (!g || g === 'ЧастныйСад') continue
-    const { normalized } = normalizeRegion(plant.region)
+    const { normalized } = await normalizeRegion(plant.region)
     if (!normalized) continue
     if (!gardenRegionVotes[g]) gardenRegionVotes[g] = {}
     gardenRegionVotes[g][normalized] = (gardenRegionVotes[g][normalized] || 0) + 1
@@ -531,7 +606,7 @@ function enrich() {
     const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1])
     const [topRegion, topCount] = sorted[0]
     if (topCount / total < 0.9) continue
-    const { normalized } = normalizeRegion(plant.region)
+    const { normalized } = await normalizeRegion(plant.region)
     if (normalized && normalized !== topRegion) {
       plant.region = topRegion
       regionFixed++
@@ -539,10 +614,11 @@ function enrich() {
   }
   if (regionFixed > 0) console.log(`  Fixed ${regionFixed} outlier regions by garden majority vote`)
 
-  const enriched: EnrichedPlant[] = catalog.map(plant => {
+  const enriched: EnrichedPlant[] = []
+  for (const plant of catalog) {
     const { form, form_ru } = parseForm(plant.cultivar, plant.species, plant.latin_full)
     const { color, color_ru } = parseColor(plant.cultivar, plant.species)
-    const { normalized: region_normalized, district: region_district } = normalizeRegion(plant.region)
+    const { normalized: region_normalized, district: region_district } = await normalizeRegion(plant.region)
     const hardiness_zone = HARDINESS_MAP[region_normalized] ?? null
     const hardiness_label = hardiness_zone ? HARDINESS_LABELS[hardiness_zone] : ''
     // Normalize garden name (dedup aliases, fix typos)
@@ -577,7 +653,7 @@ function enrich() {
       speciesCounts[plant.genus][key].count++
     }
 
-    return {
+    enriched.push({
       ...plant,
       garden: gardenNormalized,
       species_full,
@@ -599,8 +675,8 @@ function enrich() {
       size_display,
       is_russian_enriched,
       is_new: plant.is_new || false,
-    }
-  })
+    })
+  }
 
   // Rebuild genera index from actual catalog data (picks up new genera/counts automatically)
   const generaFromCatalog = new Map<string, { genus: string; genus_ru: string; count: number; cover_thumb: string; species: Set<string> }>()
@@ -738,4 +814,4 @@ function enrich() {
   console.log('\n✅ Done!')
 }
 
-enrich()
+enrich().catch(e => { console.error(e); process.exit(1) })
