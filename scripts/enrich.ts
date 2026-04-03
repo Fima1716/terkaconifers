@@ -284,11 +284,18 @@ const REGION_RULES: [string, RegExp[]][] = [
 async function normalizeRegion(region: string): Promise<{ normalized: string; district: string }> {
   if (!region) return { normalized: '', district: '' }
 
+  // Noise words that are not real districts (macro-regions, duplicates of the region itself)
+  const DISTRICT_NOISE = /^(западная сибирь|восточная сибирь|сибирь|урал|поволжье|дальний восток|центральная россия|юг россии)$/i
+
   for (const [canonical, patterns] of REGION_RULES) {
     for (const pat of patterns) {
       if (pat.test(region)) {
         const parts = region.split(',').map(s => s.trim())
-        const district = parts.length > 1 ? parts.slice(1).join(', ').replace(/\.$/, '').trim() : ''
+        let district = parts.length > 1 ? parts.slice(1).join(', ').replace(/\.$/, '').trim() : ''
+        // Strip noise: macro-regions and duplicates of canonical name
+        if (DISTRICT_NOISE.test(district) || district.toLowerCase() === canonical.toLowerCase()) {
+          district = ''
+        }
         return { normalized: canonical, district }
       }
     }
