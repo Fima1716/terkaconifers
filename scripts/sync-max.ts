@@ -489,6 +489,21 @@ async function main() {
   log(`  Total catalog now: ${catalog.length}`)
 
   if (added > 0 || updated > 0 || cleared > 0) {
+    // Apply manual overrides (protected plants that shouldn't be overwritten by sync)
+    const overridesPath = resolve(DATA_DIR, 'plant-overrides.json')
+    if (existsSync(overridesPath)) {
+      const overrides = JSON.parse(readFileSync(overridesPath, 'utf-8'))
+      let overridden = 0
+      for (const entry of catalog) {
+        const ov = overrides[String(entry._site_id)]
+        if (ov) {
+          for (const [k, v] of Object.entries(ov)) entry[k] = v
+          overridden++
+        }
+      }
+      if (overridden > 0) log(`  Applied ${overridden} manual overrides`)
+    }
+
     // Save catalog
     writeFileSync(catalogPath, JSON.stringify(catalog))
     log('  Saved catalog.json')
