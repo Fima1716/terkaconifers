@@ -220,6 +220,25 @@ async function flushMediaGroup(groupId: string) {
   await forwardToMax(group.chatId, group.userId, group.userName, group.username, group.caption, group.fileIds, group.msgId)
 }
 
+// ── Dedup: shared processed-mids with bot.ts ─────────────
+const PROCESSED_FILE = resolve(ROOT, 'data/processed-mids.json')
+
+function markProcessed(mid: string) {
+  try {
+    const arr: string[] = existsSync(PROCESSED_FILE) ? JSON.parse(readFileSync(PROCESSED_FILE, 'utf-8')) : []
+    arr.push(mid)
+    const trimmed = arr.length > 500 ? arr.slice(-500) : arr
+    writeFileSync(PROCESSED_FILE, JSON.stringify(trimmed))
+  } catch {}
+}
+
+function isAlreadyProcessed(mid: string): boolean {
+  try {
+    const arr = JSON.parse(readFileSync(PROCESSED_FILE, 'utf-8'))
+    return arr.includes(mid)
+  } catch { return false }
+}
+
 // ── Forward TG submission to MAX ─────────────────────────
 async function forwardToMax(tgChatId: number, tgUserId: number, userName: string, username: string, text: string, photoFileIds: string[], tgMsgId?: number) {
   // Download photo URLs from TG
@@ -384,6 +403,10 @@ async function processMax(update: any) {
   const msg = update.message
   if (!msg || msg.sender?.is_bot) return
 
+  // Dedup: skip messages already processed by bot.ts
+  const msgMid = msg.body?.mid || ''
+  if (msgMid && isAlreadyProcessed(msgMid)) return
+
   const chatId = msg.recipient?.chat_id
   if (String(chatId) !== String(ADMIN_CHAT_ID)) return
 
@@ -392,6 +415,9 @@ async function processMax(update: any) {
 
   const target = state.midMap[replyMid]
   if (!target) return // Not a TG submission — let Леший handle it
+
+  // Mark as processed so bot.ts won't also handle this admin reply to TG submission
+  if (msgMid) markProcessed(msgMid)
 
   const text = msg.body?.text || ''
   const name = msg.sender?.name || '?'

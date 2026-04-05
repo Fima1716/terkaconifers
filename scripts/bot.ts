@@ -331,6 +331,32 @@ Picea pungens 'Hoopsii'
 
 const NEXT_STEP = `\n\nЕсли хотите предложить ещё одно растение — отправьте фото (1–3 шт.) с описанием в одном сообщении:\n\n— Латинское название\n— Русское название\n— Локация\n— Возраст\n— Размер\n— Название сада`
 
+// ── Dedup: prevent double processing when two bots poll same token ──
+const PROCESSED_FILE = resolve(ROOT, 'data/processed-mids.json')
+const processedMids = new Set<string>(
+  existsSync(PROCESSED_FILE) ? JSON.parse(readFileSync(PROCESSED_FILE, 'utf-8')) : []
+)
+
+function markProcessed(mid: string) {
+  processedMids.add(mid)
+  // Keep last 500
+  const arr = [...processedMids]
+  if (arr.length > 500) {
+    const trimmed = arr.slice(-500)
+    processedMids.clear()
+    for (const m of trimmed) processedMids.add(m)
+  }
+  writeFileSync(PROCESSED_FILE, JSON.stringify([...processedMids]))
+}
+
+function isAlreadyProcessed(mid: string): boolean {
+  // Re-read from disk in case other bot wrote it
+  try {
+    const arr = JSON.parse(readFileSync(PROCESSED_FILE, 'utf-8'))
+    return arr.includes(mid)
+  } catch { return processedMids.has(mid) }
+}
+
 // ── Process updates ────────────────────────────────────────
 async function process(update: any) {
   const type = update.update_type
@@ -629,6 +655,14 @@ async function process(update: any) {
     }])
     return
   }
+
+  // ── Dedup: check if another bot already processed this message ──
+  const msgMid = msg.body?.mid || ''
+  if (msgMid && isAlreadyProcessed(msgMid)) {
+    log(`Dedup: skipping already processed message ${msgMid} from ${name}`)
+    return
+  }
+  if (msgMid) markProcessed(msgMid)
 
   // ── Extract photos ──
   const photos: string[] = []
