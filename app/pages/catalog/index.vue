@@ -45,6 +45,11 @@ watch(() => route.query, (q) => {
   if (q.cultivar) catalog.setFilter('cultivar', decodeURIComponent(String(q.cultivar)))
 }, { immediate: true })
 
+// Remember current catalog URL for "back to catalog" from plant pages
+watch(() => route.fullPath, (path) => {
+  catalog.lastCatalogUrl = path
+}, { immediate: true })
+
 const sortOptions = [
   { value: 'date_desc', label: 'По дате (новые)' },
   { value: 'name_asc', label: 'По названию (А → Я)' },

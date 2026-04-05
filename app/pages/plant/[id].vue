@@ -189,7 +189,7 @@ async function sharePlant() {
     <nav class="breadcrumbs">
       <NuxtLink to="/">Главная</NuxtLink>
       <span class="sep">/</span>
-      <NuxtLink to="/catalog">Каталог</NuxtLink>
+      <NuxtLink :to="catalog.lastCatalogUrl">Каталог</NuxtLink>
       <span class="sep">/</span>
       <NuxtLink :to="`/catalog?genus=${plant.genus}`">{{ plant.genus_ru }}</NuxtLink>
       <span class="sep">/</span>

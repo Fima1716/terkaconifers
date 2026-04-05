@@ -166,7 +166,10 @@ Pinus mugo 'Aurus'
 Хештеги (каждый с новой строки, в конце):
 1. #Род — #Ель, #Сосна, #Пихта, #Можжевельник, #Туя, #Лиственница, #Тсуга, #Тис, #Кипарисовик, #Микробиота
 2. #Род_вид — #Ель_обыкновенная, #Сосна_горная, #Пихта_корейская, #Туя_западная и т.д.
-3. #НазваниеСада — слитно без пробелов: #РусиновСад, #СадАнжеликиКолесник, #ПитомникГорошкевича
+3. #НазваниеСада — слитно без пробелов, ОБЯЗАТЕЛЬНО с префиксом (Сад, Питомник и т.д.):
+   ПРАВИЛЬНО: #СадКозловойНатальи, #СадАнжеликиКолесник, #ПитомникГорошкевича, #РусиновСад
+   НЕПРАВИЛЬНО: #КозловойНатальи, #АнжеликиКолесник (нельзя без "Сад"!)
+   Если название сада содержит слово "Сад" — оно ДОЛЖНО быть в хештеге. Никогда не выбрасывай "Сад" из хештега.
 4. #Российский_сорт — если указано что сорт российский
 
 Оригинатор:
@@ -414,7 +417,9 @@ async function process(update: any) {
     if (pending && text) {
       // "ок" → publish AI text; anything else → publish admin's text
       const isApprove = text.trim() === '+' || text.trim().toLowerCase() === 'ок' || text.trim().toLowerCase() === 'ok'
-      const publishText = isApprove && pending.aiText ? pending.aiText : text
+      let publishText = isApprove && pending.aiText ? pending.aiText : text
+      // Safety: strip bot instruction text if admin accidentally copied the full preview
+      publishText = publishText.replace(/\n?——————[\s\S]*$/, '').replace(/\n?📌 Что делать:[\s\S]*$/, '').trim()
 
       const pubAttachments = pending.photos.map((url: string) => ({ type: 'image', payload: { url } }))
       const pubResult: any = await send(PROTECTED_CATALOG_ID, publishText, pubAttachments.length ? pubAttachments : undefined)

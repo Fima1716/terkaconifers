@@ -164,6 +164,8 @@ export const useCatalogStore = defineStore('catalog', {
       sort: 'date_desc',
     } as ActiveFilters,
     visible: 24,
+    /** Last catalog URL with filters — for "back to catalog" from plant page */
+    lastCatalogUrl: '/catalog' as string,
   }),
 
   getters: {

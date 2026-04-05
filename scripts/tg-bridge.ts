@@ -160,7 +160,8 @@ Genus species 'Cultivar'
 Хештеги (каждый с новой строки):
 1. #Род — #Ель, #Сосна, #Пихта и т.д.
 2. #Род_вид — #Ель_обыкновенная и т.д.
-3. #НазваниеСада — слитно
+3. #НазваниеСада — слитно, ОБЯЗАТЕЛЬНО с префиксом (Сад, Питомник и т.д.):
+   ПРАВИЛЬНО: #СадКозловойНатальи, #РусиновСад  НЕПРАВИЛЬНО: #КозловойНатальи (нельзя без "Сад"!)
 4. #Российский_сорт — если указано
 
 Очистка: удали 👤, (#IDxxxx), @username, метки бота.
@@ -468,7 +469,9 @@ async function processMax(update: any) {
   const pending = state.pendingPublish[replyMid]
   if (pending && text) {
     const isApprove = text.trim() === '+' || text.trim().toLowerCase() === 'ок' || text.trim().toLowerCase() === 'ok'
-    const publishText = isApprove && pending.aiText ? pending.aiText : text
+    let publishText = isApprove && pending.aiText ? pending.aiText : text
+    // Safety: strip bot instruction text if admin accidentally copied the full preview
+    publishText = publishText.replace(/\n?——————[\s\S]*$/, '').replace(/\n?📌 Что делать:[\s\S]*$/, '').trim()
     const pubAttachments = pending.photos.map(url => ({ type: 'image', payload: { url } }))
     await maxSend(PROTECTED_CATALOG_ID, publishText, pubAttachments.length ? pubAttachments : undefined)
     await maxSend(ADMIN_CHAT_ID, `📢 [TG] Опубликовано в канале. Автор: ${pending.userName}`)
