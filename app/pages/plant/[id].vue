@@ -185,16 +185,22 @@ async function sharePlant() {
 
 <template>
   <div v-if="plant" class="plant-page container">
-    <!-- Breadcrumbs -->
-    <nav class="breadcrumbs">
-      <NuxtLink to="/">Главная</NuxtLink>
-      <span class="sep">/</span>
-      <NuxtLink :to="catalog.lastCatalogUrl">Каталог</NuxtLink>
-      <span class="sep">/</span>
-      <NuxtLink :to="`/catalog?genus=${plant.genus}`">{{ plant.genus_ru }}</NuxtLink>
-      <span class="sep">/</span>
-      <span>{{ plant.cultivar || plant.latin_full }}</span>
-    </nav>
+    <!-- Back + Breadcrumbs -->
+    <div class="nav-row">
+      <NuxtLink :to="catalog.lastCatalogUrl" class="back-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16"><path d="M15 18l-6-6 6-6"/></svg>
+        Назад в каталог
+      </NuxtLink>
+      <nav class="breadcrumbs">
+        <NuxtLink to="/">Главная</NuxtLink>
+        <span class="sep">/</span>
+        <NuxtLink :to="catalog.lastCatalogUrl">Каталог</NuxtLink>
+        <span class="sep">/</span>
+        <NuxtLink :to="`/catalog?genus=${plant.genus}`">{{ plant.genus_ru }}</NuxtLink>
+        <span class="sep">/</span>
+        <span>{{ plant.cultivar || plant.latin_full }}</span>
+      </nav>
+    </div>
 
     <div class="plant-layout">
       <!-- Gallery -->
@@ -417,10 +423,30 @@ async function sharePlant() {
 
 @media (min-width: 768px) { .plant-page { padding-top: 24px; } }
 
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (min-width: 768px) { .nav-row { margin-bottom: 20px; } }
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.back-link:hover { opacity: 0.7; }
+
 .breadcrumbs {
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 16px;
+  margin-bottom: 0;
   overflow-x: auto;
   white-space: nowrap;
   -webkit-overflow-scrolling: touch;
@@ -428,7 +454,7 @@ async function sharePlant() {
 }
 .breadcrumbs::-webkit-scrollbar { display: none; }
 
-@media (min-width: 768px) { .breadcrumbs { font-size: 13px; margin-bottom: 20px; } }
+@media (min-width: 768px) { .breadcrumbs { font-size: 13px; } }
 
 .breadcrumbs a { color: var(--text-secondary); }
 .breadcrumbs a:hover { color: var(--primary); }
