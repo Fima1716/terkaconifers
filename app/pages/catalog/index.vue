@@ -3,6 +3,7 @@ import { useCatalogStore } from '~/stores/catalog'
 
 const catalog = useCatalogStore()
 const route = useRoute()
+const router = useRouter()
 
 // Non-blocking: page renders instantly, data loads in background
 onMounted(() => { if (!catalog.isLoaded) catalog.loadCatalog() })
@@ -35,15 +36,54 @@ watch(() => sentinel.value, (el) => {
 
 onUnmounted(() => { observer?.disconnect() })
 
-// Sync URL query params to filter state
-// Always clear first, then apply only what's in the URL
+// --- Bidirectional sync: URL query ↔ store filters ---
+let updatingFromUrl = false
+let updatingFromStore = false
+
+// URL → store (on page load and browser back/forward)
 watch(() => route.query, (q) => {
+  if (updatingFromStore) return
+  updatingFromUrl = true
   catalog.clearFilters()
   if (q.genus) catalog.setFilter('genus', String(q.genus).split(','))
-  if (q.q) catalog.setFilter('search', decodeURIComponent(String(q.q)))
-  if (q.garden) catalog.setFilter('garden', decodeURIComponent(String(q.garden)))
+  if (q.species) catalog.setFilter('species', String(q.species))
   if (q.cultivar) catalog.setFilter('cultivar', decodeURIComponent(String(q.cultivar)))
+  if (q.form) catalog.setFilter('form', String(q.form))
+  if (q.color) catalog.setFilter('color', String(q.color))
+  if (q.hardiness) catalog.setFilter('hardiness', Number(q.hardiness))
+  if (q.region) catalog.setFilter('region', decodeURIComponent(String(q.region)))
+  if (q.garden) catalog.setFilter('garden', decodeURIComponent(String(q.garden)))
+  if (q.russian === '1') catalog.setFilter('isRussian', true)
+  if (q.new === '1') catalog.setFilter('onlyNew', true)
+  if (q.stock === '1') catalog.setFilter('inStock', true)
+  if (q.age) catalog.setFilter('ageRange', String(q.age))
+  if (q.q) catalog.setFilter('search', decodeURIComponent(String(q.q)))
+  if (q.sort && q.sort !== 'date_desc') catalog.setFilter('sort', String(q.sort) as any)
+  nextTick(() => { updatingFromUrl = false })
 }, { immediate: true })
+
+// Store → URL (when user changes filters via sidebar/tags)
+watch(() => catalog.activeFilters, (f) => {
+  if (updatingFromUrl) return
+  updatingFromStore = true
+  const q: Record<string, string> = {}
+  if (f.genus.length) q.genus = f.genus.join(',')
+  if (f.species) q.species = f.species
+  if (f.cultivar) q.cultivar = f.cultivar
+  if (f.form) q.form = f.form
+  if (f.color) q.color = f.color
+  if (f.hardiness !== null) q.hardiness = String(f.hardiness)
+  if (f.region) q.region = f.region
+  if (f.garden) q.garden = f.garden
+  if (f.isRussian) q.russian = '1'
+  if (f.onlyNew) q.new = '1'
+  if (f.inStock) q.stock = '1'
+  if (f.ageRange) q.age = f.ageRange
+  if (f.search) q.q = f.search
+  if (f.sort && f.sort !== 'date_desc') q.sort = f.sort
+  router.replace({ query: q })
+  nextTick(() => { updatingFromStore = false })
+}, { deep: true })
 
 // Remember current catalog URL for "back to catalog" from plant pages
 watch(() => route.fullPath, (path) => {
