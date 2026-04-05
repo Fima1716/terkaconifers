@@ -1,13 +1,15 @@
 /**
- * Бот «Леший» — relay-бот для приёма заявок.
+ * Бот «Леший» — relay-бот для приёма заявок с системой очереди.
  *
  * Флоу:
  * 1. /start → правила + кнопка согласия
- * 2. Пользователь шлёт фото/текст → бот пересылает в админский чат
- * 3. Админы обсуждают свободно
- * 4. Reply "+" → принято, reply "-" → отказ
- * 5. Reply с любым другим текстом → ответ пользователю
- * 6. /ban /unban — блокировка
+ * 2. Пользователь шлёт фото+текст → создаётся заявка, пересылается в админский чат
+ * 3. Фото без текста → обновление фото последней заявки (или выбор если несколько)
+ * 4. Текст без фото → пересылка как уточнение
+ * 5. Админ reply "+" → принято (берёт заявку), AI форматирует, предлагает текст
+ * 6. Админ reply "-" → отказ
+ * 7. Админ reply текст → ответ пользователю с контекстом заявки
+ * 8. /ban /unban /last /удалить — управление
  *
  * Запуск: npx tsx scripts/bot.ts
  */
@@ -42,31 +44,134 @@ if (String(ADMIN_CHAT_ID) === PROTECTED_CATALOG_ID) {
 }
 
 // ── State ──────────────────────────────────────────────────
+interface Submission {
+  id: number
+  origText: string
+  origPhotos: string[]
+  latestPhotos: string[]
+  latestPhotoText: string
+  allMids: string[]
+  userName: string
+  userId: number
+  chatId: number
+  createdAt: string
+}
+
 interface BotState {
   consented: Record<string, boolean>
   banned: Record<string, boolean>
-  midMap: Record<string, { userId: number; chatId: number; userName: string; photos?: string[] }>
-  // Pending publication: admin accepted, waiting for edited text to post to catalog channel
-  pendingPublish: Record<string, { photos: string[]; userName: string; aiText?: string }>
+  midMap: Record<string, { userId: number; chatId: number; userName: string; photos?: string[]; submissionId?: number }>
+  pendingPublish: Record<string, { photos: string[]; userName: string; aiText?: string; submissionId?: number; submissionUserId?: string }>
+  submissions: Record<string, Submission[]>
+  submissionCounters: Record<string, number>
+  pendingPhotoChoice: Record<string, { photos: string[]; timestamp: number }>
 }
 
 function loadState(): BotState {
   if (existsSync(STATE_FILE)) {
     try {
       const s = JSON.parse(readFileSync(STATE_FILE, 'utf-8'))
-      return { consented: s.consented || {}, banned: s.banned || {}, midMap: s.midMap || {}, pendingPublish: s.pendingPublish || {} }
+      return {
+        consented: s.consented || {},
+        banned: s.banned || {},
+        midMap: s.midMap || {},
+        pendingPublish: s.pendingPublish || {},
+        submissions: s.submissions || {},
+        submissionCounters: s.submissionCounters || {},
+        pendingPhotoChoice: s.pendingPhotoChoice || {},
+      }
     } catch {}
   }
-  return { consented: {}, banned: {}, midMap: {}, pendingPublish: {} }
+  return { consented: {}, banned: {}, midMap: {}, pendingPublish: {}, submissions: {}, submissionCounters: {}, pendingPhotoChoice: {} }
 }
 
 function saveState(s: BotState) {
   const midEntries = Object.entries(s.midMap)
   if (midEntries.length > 1000) s.midMap = Object.fromEntries(midEntries.slice(-1000))
+  // Clean stale pending photo choices (older than 24h)
+  const now = Date.now()
+  for (const [k, v] of Object.entries(s.pendingPhotoChoice)) {
+    if (now - v.timestamp > 86400000) delete s.pendingPhotoChoice[k]
+  }
   writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
 }
 
 const state = loadState()
+
+// ── Submission helpers ────────────────────────────────────
+function getSubmissions(userId: number | string): Submission[] {
+  return state.submissions[String(userId)] || []
+}
+
+function createSubmission(userId: number, chatId: number, userName: string, text: string, photos: string[]): Submission {
+  const key = String(userId)
+  if (!state.submissionCounters[key]) state.submissionCounters[key] = 0
+  state.submissionCounters[key]++
+  const sub: Submission = {
+    id: state.submissionCounters[key],
+    origText: text,
+    origPhotos: photos,
+    latestPhotos: [],
+    latestPhotoText: '',
+    allMids: [],
+    userName, userId, chatId,
+    createdAt: new Date().toISOString(),
+  }
+  if (!state.submissions[key]) state.submissions[key] = []
+  state.submissions[key].push(sub)
+  return sub
+}
+
+function findSubmissionByMid(userId: number | string, mid: string): Submission | undefined {
+  return getSubmissions(userId).find(s => s.allMids.includes(mid))
+}
+
+function removeSubmission(userId: number | string, submissionId: number) {
+  const key = String(userId)
+  if (state.submissions[key]) {
+    state.submissions[key] = state.submissions[key].filter(s => s.id !== submissionId)
+    if (state.submissions[key].length === 0) delete state.submissions[key]
+  }
+}
+
+/** Short latin name for display: first line of origText up to first comma/newline */
+function submissionShortName(sub: Submission): string {
+  const firstLine = sub.origText.split('\n')[0] || ''
+  // Try to extract latin name (before comma, before 👤)
+  const clean = firstLine.replace(/👤.*$/, '').replace(/#\S+/g, '').trim()
+  const short = clean.split(/[,;]/)[0].trim()
+  return short.substring(0, 60) || '(без описания)'
+}
+
+function subLabel(sub: Submission, total: number): string {
+  const name = submissionShortName(sub)
+  return total > 1 ? `заявка №${sub.id} (${name})` : `заявка (${name})`
+}
+
+function subLabelShort(sub: Submission, total: number): string {
+  return total > 1 ? `Заявка №${sub.id}` : 'Заявка'
+}
+
+function getSubmissionPhotos(sub: Submission): string[] {
+  return sub.latestPhotos.length > 0 ? sub.latestPhotos : sub.origPhotos
+}
+
+function getSubmissionTextForAI(sub: Submission, supplementText?: string): string {
+  let text = sub.origText
+  // Add latest photo text if it has extra info
+  if (sub.latestPhotoText && sub.latestPhotoText !== sub.origText) {
+    text += `\n\nДополнение от пользователя:\n${sub.latestPhotoText}`
+  }
+  // Add supplement from the specific message admin replied to
+  if (supplementText && supplementText !== sub.origText && supplementText !== sub.latestPhotoText) {
+    // Clean up: remove 👤 line and bot metadata
+    const cleaned = supplementText.replace(/\n*👤.*$/s, '').trim()
+    if (cleaned && cleaned !== sub.origText.replace(/\n*👤.*$/s, '').trim()) {
+      text += `\n\nДополнение:\n${cleaned}`
+    }
+  }
+  return text
+}
 
 // ── API ────────────────────────────────────────────────────
 const H = { Authorization: TOKEN, 'Content-Type': 'application/json' }
@@ -224,6 +329,8 @@ Picea pungens 'Hoopsii'
 
 Мы рассмотрим и ответим вам здесь.`
 
+const NEXT_STEP = `\n\nЕсли хотите предложить ещё одно растение — отправьте фото (1–3 шт.) с описанием в одном сообщении:\n\n— Латинское название\n— Русское название\n— Локация\n— Возраст\n— Размер\n— Название сада`
+
 // ── Process updates ────────────────────────────────────────
 async function process(update: any) {
   const type = update.update_type
@@ -256,7 +363,7 @@ async function process(update: any) {
     if (cb?.payload === 'consent_agree') {
       const uid = String(cb?.user?.user_id || update.user_id)
       const cbChatId = update.message?.recipient?.chat_id || update.chat_id
-      log(`Consent callback: uid=${uid}, chat_id=${cbChatId}, raw=${JSON.stringify({ chat_id: update.chat_id, msg_chat: update.message?.recipient?.chat_id }).substring(0, 200)}`)
+      log(`Consent callback: uid=${uid}, chat_id=${cbChatId}`)
       if (state.consented[uid]) {
         await answerCallback(cb.callback_id)
         if (cbChatId) await send(cbChatId, '✅ Вы уже дали согласие. Отправьте фото + описание растения.')
@@ -362,51 +469,60 @@ async function process(update: any) {
       return
     }
 
-    const NEXT_STEP = `\n\nЕсли хотите предложить ещё одно растение — отправьте фото (1–3 шт.) с описанием в одном сообщении:\n\n— Латинское название\n— Русское название\n— Локация\n— Возраст\n— Размер\n— Название сада`
-
-    // "+" → принято, AI форматирует, предлагает админу
+    // "+" → принято: найти заявку, AI форматировать, предложить админу
     if (text.trim() === '+') {
-      const userMsg = `✅ Ваше фото принято! Спасибо за вклад в каталог «Территория хвойных».${NEXT_STEP}`
-      await send(target.chatId, userMsg)
-
-      // Get original message text from the forwarded message (via reply chain)
-      const origText = msg.link?.message?.text || msg.link?.message?.body?.text || ''
-      const photos = (target as any).photos || []
-      log(`  origText for dupe check: "${origText.substring(0, 80)}..."`)
-
-      // AI formatting
-      const formatted = origText ? await formatWithAI(origText) : null
-
-      // Triple duplicate check: raw text → AI text → catalog + recent publications + pending
-      let dupeResult = findAllDuplicates(origText)
-      if (!dupeResult && formatted) dupeResult = findAllDuplicates(formatted)
-      const submittedGarden = formatted ? extractGarden(formatted) : ''
-      const dupeWarning = dupeResult ? formatDupeWarning(dupeResult.matches, submittedGarden) : ''
-
-      let askText: string
-      if (formatted) {
-        askText = `✅ Заявка от ${target.userName} принята.${dupeWarning}\n\n🤖 Предложенный текст для канала:\n——————\n${formatted}\n——————\n\n📌 Что делать:\n• Текст устраивает → ответьте на это сообщение «ок»\n• Нужно поправить → ответьте на это сообщение своим вариантом текста`
-      } else {
-        askText = `✅ Заявка от ${target.userName} принята.${dupeWarning}\n\nОтветьте на это сообщение с текстом для публикации в канале.`
+      const userSubs = getSubmissions(target.userId)
+      // Find submission: by mid first, then fallback
+      let sub = findSubmissionByMid(target.userId, replyMid)
+      if (!sub && userSubs.length === 1) sub = userSubs[0]
+      if (!sub && userSubs.length > 1) {
+        await send(ADMIN_CHAT_ID, `⚠️ У пользователя ${target.userName} несколько активных заявок (${userSubs.length} шт.).\nОтветьте + на конкретное сообщение с фото нужной заявки.`)
+        return
+      }
+      if (!sub) {
+        // Fallback: no submission system entry (old-style message or submission was cleared)
+        // Use photos/text from midMap directly (backward compatibility)
+        const origText = msg.link?.message?.text || msg.link?.message?.body?.text || ''
+        const photos = target.photos || []
+        if (!origText && !photos.length) {
+          await send(ADMIN_CHAT_ID, `⚠️ Не найдена активная заявка от ${target.userName}. Попросите прислать фото + описание заново.`)
+          return
+        }
+        // Process old-style (no submission tracking)
+        await processAccept(target, origText, photos, name, null)
+        return
       }
 
-      const askResult: any = await send(ADMIN_CHAT_ID, askText)
-      const askMid = askResult?.message?.body?.mid
-      if (askMid) {
-        state.pendingPublish[askMid] = { photos, userName: target.userName, aiText: formatted || undefined } as any
-        state.midMap[askMid] = { userId: target.userId, chatId: target.chatId, userName: target.userName }
-      }
+      // Build text for AI
+      const repliedText = msg.link?.message?.text || msg.link?.message?.body?.text || ''
+      const aiInput = getSubmissionTextForAI(sub, repliedText)
+      const photos = getSubmissionPhotos(sub)
+      const total = userSubs.length
+      const label = subLabel(sub, total)
 
-      saveState(state)
-      log(`Accepted: ${target.userName} by ${name}, AI formatted: ${!!formatted}`)
+      // Notify user
+      await send(target.chatId, `✅ ${subLabelShort(sub, total)} принята! Спасибо за вклад в каталог «Территория хвойных».${NEXT_STEP}`)
+
+      // AI + preview
+      await processAccept(target, aiInput, photos, name, sub)
       return
     }
 
     // "-" → отказ
     if (text.trim() === '-') {
-      const userMsg = `🙏 Спасибо за вашу заявку! К сожалению, данное растение не подходит по нашим критериям.${NEXT_STEP}`
-      await send(target.chatId, userMsg)
-      await send(ADMIN_CHAT_ID, `❌ Заявка от ${target.userName} отклонена.`)
+      const userSubs = getSubmissions(target.userId)
+      let sub = findSubmissionByMid(target.userId, replyMid)
+      if (!sub && userSubs.length === 1) sub = userSubs[0]
+
+      if (sub) {
+        const total = userSubs.length
+        await send(target.chatId, `🙏 По ${subLabel(sub, total)}: к сожалению, данное растение не подходит по нашим критериям.${NEXT_STEP}`)
+        await send(ADMIN_CHAT_ID, `❌ Отклонена ${subLabel(sub, total)} от ${target.userName}.`)
+        removeSubmission(target.userId, sub.id)
+      } else {
+        await send(target.chatId, `🙏 Спасибо за вашу заявку! К сожалению, данное растение не подходит по нашим критериям.${NEXT_STEP}`)
+        await send(ADMIN_CHAT_ID, `❌ Заявка от ${target.userName} отклонена.`)
+      }
       saveState(state)
       log(`Rejected: ${target.userName} by ${name}`)
       return
@@ -431,18 +547,39 @@ async function process(update: any) {
       const firstLine = publishText.split('\n').filter(Boolean)[0] || ''
       if (parsed) addPublication(parsed.normalized, '', 'max', { channelMid, text: firstLine, author: pending.userName })
 
+      // Clean up submission
+      if (pending.submissionId && pending.submissionUserId) {
+        removeSubmission(pending.submissionUserId, pending.submissionId)
+      }
+
       delete state.pendingPublish[replyMid]
       saveState(state)
       log(`Published to channel: ${publishText.substring(0, 50)} (${pending.photos.length} photos, from ${pending.userName})`)
       return
     }
 
-    // Любой другой reply → пересылка пользователю
-    const photos: any[] = []
+    // Любой другой reply → пересылка пользователю с контекстом заявки
+    const replyPhotos: any[] = []
     for (const att of (msg.body?.attachments || [])) {
-      if (att.type === 'image') photos.push(att)
+      if (att.type === 'image') replyPhotos.push(att)
     }
-    await send(target.chatId, text, photos.length ? photos : undefined)
+
+    // Add submission context to relay
+    const userSubs = getSubmissions(target.userId)
+    const sub = findSubmissionByMid(target.userId, replyMid)
+    let userText = text
+    if (sub) {
+      const total = userSubs.length
+      userText = `💬 По ${subLabel(sub, total)}:\n${text}`
+    }
+
+    await send(target.chatId, userText, replyPhotos.length ? replyPhotos : undefined)
+
+    // Confirm to admin with context
+    if (sub) {
+      const total = userSubs.length
+      await send(ADMIN_CHAT_ID, `↩️ Отправлено пользователю (${subLabel(sub, total)})`, undefined, msg.body?.mid)
+    }
 
     log(`Reply → ${target.userName}: ${text.substring(0, 50)}`)
     return
@@ -493,26 +630,206 @@ async function process(update: any) {
     return
   }
 
-  // ── Forward to admin chat ──
+  // ── Extract photos ──
   const photos: string[] = []
   for (const att of (msg.body?.attachments || [])) {
     if (att.type === 'image' && att.payload?.url) photos.push(att.payload.url)
   }
 
   const userTag = username ? `@${username}` : ''
-  let adminText = text || ''
-  adminText += `\n\n👤 ${name}, ${userTag} (#ID${uid})`
+  const userSubs = getSubmissions(uid)
 
-  const attachments: any[] = photos.map(url => ({ type: 'image', payload: { url } }))
+  // ── Check for pending photo choice response ──
+  const pendingChoice = state.pendingPhotoChoice[String(uid)]
+  if (pendingChoice && !photos.length && text) {
+    const num = parseInt(text.trim())
+    if (num && num >= 1) {
+      const targetSub = userSubs.find(s => s.id === num)
+      if (targetSub) {
+        targetSub.latestPhotos = pendingChoice.photos
+        delete state.pendingPhotoChoice[String(uid)]
 
-  const result: any = await send(ADMIN_CHAT_ID, adminText, attachments.length ? attachments : undefined)
-  const mid = result?.message?.body?.mid
-  if (mid) {
-    state.midMap[mid] = { userId: uid, chatId, userName: name, photos }
+        // Confirm to user
+        const total = userSubs.length
+        const photoCount = pendingChoice.photos.length
+        await send(chatId, `📸 Фото (${photoCount} шт.) обновлено для ${subLabel(targetSub, total)}.`)
+
+        // Forward to admin
+        const adminText = `📸 Обновлённые фото к ${subLabel(targetSub, total)}\n\n👤 ${name}, ${userTag} (#ID${uid})`
+        const attachments = pendingChoice.photos.map(url => ({ type: 'image', payload: { url } }))
+        const result: any = await send(ADMIN_CHAT_ID, adminText, attachments)
+        const mid = result?.message?.body?.mid
+        if (mid) {
+          targetSub.allMids.push(mid)
+          state.midMap[mid] = { userId: uid, chatId, userName: name, photos: pendingChoice.photos, submissionId: targetSub.id }
+        }
+
+        saveState(state)
+        log(`Photo choice ${num} from ${name}: ${photoCount} photos → submission ${targetSub.id}`)
+        return
+      }
+    }
+    // Invalid choice — cancel and continue with normal processing
+    delete state.pendingPhotoChoice[String(uid)]
     saveState(state)
   }
 
-  log(`Forwarded from ${name}: ${photos.length} photos, ${text.substring(0, 40)}`)
+  // ── CASE A: Photo + text → new submission ──
+  if (photos.length > 0 && text) {
+    // Cancel any pending photo choice
+    delete state.pendingPhotoChoice[String(uid)]
+
+    const sub = createSubmission(uid, chatId, name, text, photos)
+    const total = getSubmissions(uid).length
+
+    // Confirm to user immediately
+    const shortName = submissionShortName(sub)
+    const label = total > 1 ? `📋 Заявка №${sub.id} получена!` : '📋 Заявка получена!'
+    await send(chatId, `${label}\n${shortName}\n📸 ${photos.length} фото\nАдминистраторы рассмотрят и ответят вам здесь.`)
+
+    // Forward to admin
+    let adminText = `📋 ${subLabelShort(sub, total)}\n\n${text}\n\n👤 ${name}, ${userTag} (#ID${uid})`
+    const attachments = photos.map(url => ({ type: 'image', payload: { url } }))
+    const result: any = await send(ADMIN_CHAT_ID, adminText, attachments)
+    const mid = result?.message?.body?.mid
+    if (mid) {
+      sub.allMids.push(mid)
+      state.midMap[mid] = { userId: uid, chatId, userName: name, photos, submissionId: sub.id }
+    }
+
+    saveState(state)
+    log(`New submission #${sub.id} from ${name}: ${photos.length} photos, "${text.substring(0, 40)}"`)
+    return
+  }
+
+  // ── CASE B: Only photos, no text → update existing submission ──
+  if (photos.length > 0 && !text) {
+    if (userSubs.length === 0) {
+      // No active submissions → create one without text
+      const sub = createSubmission(uid, chatId, name, '', photos)
+      const total = getSubmissions(uid).length
+      await send(chatId, `📋 ${total > 1 ? `Заявка №${sub.id} получена!` : 'Заявка получена!'}\n📸 ${photos.length} фото\nПожалуйста, добавьте описание: латинское название, регион, возраст.`)
+
+      const adminText = `📋 ${subLabelShort(sub, total)} (без описания)\n\n👤 ${name}, ${userTag} (#ID${uid})`
+      const attachments = photos.map(url => ({ type: 'image', payload: { url } }))
+      const result: any = await send(ADMIN_CHAT_ID, adminText, attachments)
+      const mid = result?.message?.body?.mid
+      if (mid) {
+        sub.allMids.push(mid)
+        state.midMap[mid] = { userId: uid, chatId, userName: name, photos, submissionId: sub.id }
+      }
+      saveState(state)
+      log(`New submission #${sub.id} (no text) from ${name}: ${photos.length} photos`)
+      return
+    }
+
+    if (userSubs.length === 1) {
+      // Single active submission → update photos
+      const sub = userSubs[0]
+      sub.latestPhotos = photos
+      const total = 1
+      await send(chatId, `📸 Фото обновлено для вашей ${subLabel(sub, total)}.\nТеперь: ${photos.length} фото.`)
+
+      const adminText = `📸 Обновлённые фото к ${subLabel(sub, total)}\n\n👤 ${name}, ${userTag} (#ID${uid})`
+      const attachments = photos.map(url => ({ type: 'image', payload: { url } }))
+      const result: any = await send(ADMIN_CHAT_ID, adminText, attachments)
+      const mid = result?.message?.body?.mid
+      if (mid) {
+        sub.allMids.push(mid)
+        state.midMap[mid] = { userId: uid, chatId, userName: name, photos, submissionId: sub.id }
+      }
+      saveState(state)
+      log(`Updated photos for submission #${sub.id} from ${name}: ${photos.length} photos`)
+      return
+    }
+
+    // Multiple submissions → ask user
+    state.pendingPhotoChoice[String(uid)] = { photos, timestamp: Date.now() }
+    let choiceText = `У вас несколько активных заявок:\n`
+    for (const s of userSubs) {
+      const photoCount = getSubmissionPhotos(s).length
+      choiceText += `${s.id}. ${submissionShortName(s)} (${photoCount} фото)\n`
+    }
+    choiceText += `\nК какой заявке обновить фото? Ответьте номером.`
+    await send(chatId, choiceText)
+    saveState(state)
+    log(`Photo choice requested from ${name}: ${userSubs.length} submissions`)
+    return
+  }
+
+  // ── CASE C: Text only → forward as clarification ──
+  if (text && !photos.length) {
+    let adminText = text + `\n\n👤 ${name}, ${userTag} (#ID${uid})`
+
+    // Tag with submission if unambiguous
+    if (userSubs.length === 1) {
+      const sub = userSubs[0]
+      adminText = `↳ к ${subLabel(sub, 1)}\n\n${text}\n\n👤 ${name}, ${userTag} (#ID${uid})`
+    }
+
+    const result: any = await send(ADMIN_CHAT_ID, adminText)
+    const mid = result?.message?.body?.mid
+    if (mid) {
+      state.midMap[mid] = { userId: uid, chatId, userName: name }
+      // Link to submission if unambiguous
+      if (userSubs.length === 1) {
+        userSubs[0].allMids.push(mid)
+        state.midMap[mid].submissionId = userSubs[0].id
+      }
+    }
+    saveState(state)
+    log(`Forwarded text from ${name}: "${text.substring(0, 40)}"`)
+    return
+  }
+
+  // Fallback: no text, no photos (sticker, etc.)
+  log(`Ignored non-text/photo message from ${name}`)
+}
+
+// ── Accept + AI format + preview ────────────────────────────
+async function processAccept(
+  target: { userId: number; chatId: number; userName: string },
+  aiInput: string,
+  photos: string[],
+  adminName: string,
+  sub: Submission | null,
+) {
+  log(`  AI input: "${aiInput.substring(0, 80)}..."`)
+
+  // AI formatting
+  const formatted = aiInput ? await formatWithAI(aiInput) : null
+
+  // Triple duplicate check
+  let dupeResult = findAllDuplicates(aiInput)
+  if (!dupeResult && formatted) dupeResult = findAllDuplicates(formatted)
+  const submittedGarden = formatted ? extractGarden(formatted) : ''
+  const dupeWarning = dupeResult ? formatDupeWarning(dupeResult.matches, submittedGarden) : ''
+
+  const subContext = sub ? ` (${submissionShortName(sub)})` : ''
+
+  let askText: string
+  if (formatted) {
+    askText = `✅ Заявка от ${target.userName}${subContext} принята.${dupeWarning}\n\n🤖 Предложенный текст для канала:\n——————\n${formatted}\n——————\n📸 Фото: ${photos.length} шт.\n\n📌 Что делать:\n• Текст устраивает → ответьте на это сообщение «ок»\n• Нужно поправить → ответьте на это сообщение своим вариантом текста`
+  } else {
+    askText = `✅ Заявка от ${target.userName}${subContext} принята.${dupeWarning}\n📸 Фото: ${photos.length} шт.\n\nОтветьте на это сообщение с текстом для публикации в канале.`
+  }
+
+  const askResult: any = await send(ADMIN_CHAT_ID, askText)
+  const askMid = askResult?.message?.body?.mid
+  if (askMid) {
+    state.pendingPublish[askMid] = {
+      photos,
+      userName: target.userName,
+      aiText: formatted || undefined,
+      submissionId: sub?.id,
+      submissionUserId: sub ? String(sub.userId) : undefined,
+    } as any
+    state.midMap[askMid] = { userId: target.userId, chatId: target.chatId, userName: target.userName }
+    if (sub) sub.allMids.push(askMid)
+  }
+
+  saveState(state)
+  log(`Accepted: ${target.userName} by ${adminName}, AI formatted: ${!!formatted}, photos: ${photos.length}`)
 }
 
 // ── Logging ────────────────────────────────────────────────
@@ -523,7 +840,7 @@ function log(msg: string) {
 // ── Long polling ───────────────────────────────────────────
 async function poll() {
   let marker: number | null = null
-  log(`🌲 Bot "Леший" started → ADMIN_CHAT_ID=${ADMIN_CHAT_ID}`)
+  log(`🌲 Bot "Леший" v2 started → ADMIN_CHAT_ID=${ADMIN_CHAT_ID}`)
 
   while (true) {
     try {
