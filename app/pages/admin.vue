@@ -269,6 +269,7 @@ const tabs = [
   { id: 'diary', label: 'Дневник', icon: 'diary' },
   { id: 'conditions', label: 'Условия', icon: 'conditions' },
   { id: 'users', label: 'Пользователи', icon: 'users' },
+  { id: 'bot', label: 'Бот', icon: 'bot' },
 ]
 
 // Buy buttons toggles
@@ -521,6 +522,138 @@ function formatDate(iso: string) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
+
+// ── Bot dashboard ──
+const botStats = ref<any>(null)
+const botStatsLoading = ref(false)
+const botStatsPeriod = ref('today')
+const botEvents = ref<any[]>([])
+const botEventsLoading = ref(false)
+const botEventsFilter = reactive({ platform: '', type: '' })
+
+async function loadBotStats() {
+  botStatsLoading.value = true
+  try {
+    botStats.value = await $fetch('/api/admin/rusinov-stats', { params: { period: botStatsPeriod.value } })
+  } catch {}
+  finally { botStatsLoading.value = false }
+}
+
+async function loadBotEvents() {
+  botEventsLoading.value = true
+  try {
+    const params: any = { limit: 100 }
+    if (botEventsFilter.platform) params.platform = botEventsFilter.platform
+    if (botEventsFilter.type) params.type = botEventsFilter.type
+    const data = await $fetch<any>('/api/admin/rusinov-events', { params })
+    botEvents.value = data.events || []
+  } catch {}
+  finally { botEventsLoading.value = false }
+}
+
+function formatBotTime(ts: number) {
+  if (!ts) return '—'
+  const d = new Date(ts)
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function formatBotDate(ts: number) {
+  if (!ts) return '—'
+  const d = new Date(ts)
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+}
+
+function timeSince(ts: number) {
+  if (!ts) return 'нет данных'
+  const diff = Date.now() - ts
+  if (diff < 60_000) return 'только что'
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}м назад`
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}ч назад`
+  return `${Math.floor(diff / 86400_000)}д назад`
+}
+
+const platformLabels: Record<string, string> = { max: 'Max.ru', tg: 'Telegram', vk: 'VK' }
+const typeLabels: Record<string, string> = { message: 'Сообщение', error: 'Ошибка', start: 'Старт', attachment: 'Вложение' }
+const queryTypeLabels: Record<string, string> = { product: 'Товар', stock_general: 'Общее наличие', stock_category: 'Наличие категории', conversation: 'Беседа' }
+
+// Query type bar widths
+const queryTypeBar = computed(() => {
+  if (!botStats.value?.queryTypes) return []
+  const types = botStats.value.queryTypes as Record<string, number>
+  const total = Object.values(types).reduce((a: number, b: number) => a + b, 0)
+  if (!total) return []
+  const colors: Record<string, string> = { product: '#4caf50', stock_general: '#2196f3', stock_category: '#ff9800', conversation: '#9c27b0' }
+  return Object.entries(types).map(([key, count]) => ({
+    key,
+    label: queryTypeLabels[key] || key,
+    count,
+    pct: Math.round((count / total) * 100),
+    color: colors[key] || '#999',
+  }))
+})
+
+watch(botStatsPeriod, () => loadBotStats())
+
+// ── Bot prompt constructor ──
+const botPrompt = ref<any>(null)
+const botLoading = ref(false)
+const botSaving = ref(false)
+
+async function loadBotPrompt() {
+  botLoading.value = true
+  try {
+    botPrompt.value = await $fetch('/api/admin/rusinov-prompt')
+  } catch (e: any) { showMsg('Не удалось загрузить промпт бота', 'err') }
+  finally { botLoading.value = false }
+}
+
+async function saveBotPrompt() {
+  if (!botPrompt.value) return
+  botSaving.value = true
+  try {
+    await $fetch('/api/admin/rusinov-prompt', { method: 'POST', body: botPrompt.value })
+    showMsg('Промпт сохранен. Изменения применятся к следующему сообщению бота.')
+  } catch (e: any) { showMsg(e?.data?.message || 'Ошибка сохранения', 'err') }
+  finally { botSaving.value = false }
+}
+
+function addBotRule() {
+  if (!botPrompt.value) return
+  botPrompt.value.rules.push({ enabled: true, text: '' })
+}
+
+function removeBotRule(idx: number) {
+  if (!botPrompt.value) return
+  botPrompt.value.rules.splice(idx, 1)
+}
+
+// Catalog sync
+const catalogSyncing = ref(false)
+const catalogResult = ref<any>(null)
+
+async function syncCatalog() {
+  catalogSyncing.value = true
+  catalogResult.value = null
+  try {
+    const res = await $fetch<any>('/api/admin/rusinov-sync', { method: 'POST' })
+    catalogResult.value = res
+    showMsg(`Каталог синхронизирован: ${res.total} товаров, ${res.inStock} в наличии`)
+  } catch (e: any) {
+    showMsg(e?.data?.message || 'Ошибка синхронизации', 'err')
+  } finally {
+    catalogSyncing.value = false
+  }
+}
+
+function addCatalogLink() {
+  if (!botPrompt.value) return
+  botPrompt.value.catalogLinks.push({ category: '', url: '' })
+}
+
+function removeCatalogLink(idx: number) {
+  if (!botPrompt.value) return
+  botPrompt.value.catalogLinks.splice(idx, 1)
+}
 </script>
 
 <template>
@@ -538,7 +671,7 @@ function formatDate(iso: string) {
           <button class="btn-logout" @click="auth.logout(); navigateTo('/login')">Выйти</button>
         </div>
         <nav class="sidebar-nav">
-          <button v-for="tab in tabs" :key="tab.id" class="nav-item" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id; if (tab.id === 'posts' && !posts.length) loadPosts(); if (tab.id === 'exchange') loadExchange(); if (tab.id === 'diary') loadDiary(); if (tab.id === 'conditions') { loadConditions(); if (!catalogStore.isLoaded) catalogStore.loadCatalog() }; if (tab.id === 'consent') loadConsents()">
+          <button v-for="tab in tabs" :key="tab.id" class="nav-item" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id; if (tab.id === 'posts' && !posts.length) loadPosts(); if (tab.id === 'exchange') loadExchange(); if (tab.id === 'diary') loadDiary(); if (tab.id === 'conditions') { loadConditions(); if (!catalogStore.isLoaded) catalogStore.loadCatalog() }; if (tab.id === 'consent') loadConsents(); if (tab.id === 'bot') { loadBotPrompt(); loadBotStats(); loadBotEvents() }">
             <span class="nav-icon">
               <svg v-if="tab.icon === 'dashboard'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
               <svg v-else-if="tab.icon === 'consent'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
@@ -549,6 +682,7 @@ function formatDate(iso: string) {
               <svg v-else-if="tab.icon === 'diary'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
               <svg v-else-if="tab.icon === 'conditions'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
               <svg v-else-if="tab.icon === 'users'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+              <svg v-else-if="tab.icon === 'bot'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1"/><circle cx="15" cy="16" r="1"/><path d="M12 2v4"/><circle cx="12" cy="5" r="2"/><path d="M8 11V9a4 4 0 018 0v2"/></svg>
             </span>
             <span class="nav-label">{{ tab.label }}</span>
           </button>
@@ -993,7 +1127,7 @@ function formatDate(iso: string) {
             <div v-if="diaryEntries.length === 0" style="color: #888; font-size: 14px; padding: 20px 0;">Записей пока нет</div>
             <div class="diary-grid">
               <div v-for="de in diaryEntries" :key="de.id" class="diary-card">
-                <img :src="`/uploads/growth/${de.photoFilename}`" class="diary-img" alt="">
+                <img :src="`/api/growth-photo/${de.photoFilename}`" class="diary-img" alt="">
                 <div class="diary-info">
                   <div class="post-name">Растение #{{ de.plantId }}</div>
                   <div class="post-meta">{{ de.year }} год · {{ de.authorContact || '—' }}</div>
@@ -1101,6 +1235,347 @@ function formatDate(iso: string) {
         <!-- ═══ Users ═══ -->
         <div v-if="activeTab === 'users'" class="page">
           <UserManagement />
+        </div>
+
+        <!-- ═══ Bot ═══ -->
+        <div v-if="activeTab === 'bot'" class="page">
+          <h2>Бот-консультант (Русинов Сад)</h2>
+          <p class="page-desc">Аналитика, статистика и конструктор промпта для AI-бота на Max.ru, Telegram и VK.</p>
+
+          <!-- ── Platform status ── -->
+          <div class="bot-platforms">
+            <div v-for="p in ['max', 'tg', 'vk']" :key="p" class="bot-platform-card">
+              <div class="bot-platform-head">
+                <span class="bot-platform-dot" :class="botStats?.byPlatform?.[p]?.lastActivity && (Date.now() - botStats.byPlatform[p].lastActivity < 3600_000) ? 'online' : 'offline'"></span>
+                <strong>{{ platformLabels[p] }}</strong>
+              </div>
+              <div class="bot-platform-stats" v-if="botStats?.byPlatform?.[p]">
+                <div>{{ botStats.byPlatform[p].messages }} сообщ. / {{ botStats.byPlatform[p].users }} польз.</div>
+                <div :style="botStats.byPlatform[p].errors ? 'color:#c62828' : ''">{{ botStats.byPlatform[p].errors }} ошиб.</div>
+                <div style="color:#888;font-size:11px">{{ timeSince(botStats.byPlatform[p].lastActivity) }}</div>
+              </div>
+              <div v-else style="color:#aaa;font-size:12px">нет данных</div>
+            </div>
+          </div>
+
+          <!-- ── Period selector + KPIs ── -->
+          <div class="panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+              <h3 style="margin:0">Обзор</h3>
+              <div class="bot-period-tabs">
+                <button v-for="pr in [{k:'today',l:'Сегодня'},{k:'week',l:'Неделя'},{k:'month',l:'Месяц'},{k:'all',l:'Всё время'}]" :key="pr.k"
+                  class="bot-period-tab" :class="{ active: botStatsPeriod === pr.k }" @click="botStatsPeriod = pr.k">{{ pr.l }}</button>
+              </div>
+            </div>
+
+            <div v-if="botStatsLoading" style="text-align:center;padding:20px;color:#888">Загрузка...</div>
+            <template v-else-if="botStats">
+              <!-- KPI cards: 2 rows -->
+              <div class="cards-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));margin-bottom:20px">
+                <div class="stat-card"><div class="stat-value">{{ botStats.totals.messages }}</div><div class="stat-label">Сообщений</div></div>
+                <div class="stat-card"><div class="stat-value">{{ botStats.totals.uniqueUsers }}</div><div class="stat-label">Юзеров</div></div>
+                <div class="stat-card"><div class="stat-value">{{ botStats.userBehavior?.returningUsers || 0 }}</div><div class="stat-label">Вернулись</div></div>
+                <div class="stat-card"><div class="stat-value">{{ botStats.userBehavior?.avgMessagesPerUser || '—' }}</div><div class="stat-label">Сообщ./юзер</div></div>
+                <div class="stat-card"><div class="stat-value">{{ botStats.avgLatency ? (botStats.avgLatency / 1000).toFixed(1) + 'с' : '—' }}</div><div class="stat-label">Ср. ответ</div></div>
+                <div class="stat-card"><div class="stat-value">{{ botStats.catalogHitRate || 0 }}%</div><div class="stat-label">Найдено в каталоге</div></div>
+                <div class="stat-card"><div class="stat-value" style="color:#4caf50">{{ botStats.satisfaction?.positive || 0 }}</div><div class="stat-label">Благодарностей</div></div>
+                <div class="stat-card" :class="{ accent: botStats.totals.errors > 0 }"><div class="stat-value">{{ botStats.totals.errors }}</div><div class="stat-label">Ошибки</div></div>
+              </div>
+
+              <!-- Query types bar -->
+              <div v-if="queryTypeBar.length" style="margin-bottom:20px">
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px">Типы запросов</div>
+                <div class="bot-qtype-bar">
+                  <div v-for="qt in queryTypeBar" :key="qt.key" class="bot-qtype-seg" :style="{ width: qt.pct + '%', background: qt.color }" :title="qt.label + ': ' + qt.count"></div>
+                </div>
+                <div class="bot-qtype-legend">
+                  <span v-for="qt in queryTypeBar" :key="qt.key"><span class="bot-qtype-dot" :style="{ background: qt.color }"></span>{{ qt.label }} ({{ qt.count }})</span>
+                </div>
+              </div>
+
+              <!-- Daily + hourly charts side by side -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px" class="bot-charts-grid">
+                <div v-if="botStats.daily?.length > 1">
+                  <div style="font-size:13px;font-weight:600;margin-bottom:8px">По дням</div>
+                  <div class="bot-hourly-chart" style="height:100px;padding-bottom:24px">
+                    <div v-for="d in botStats.daily" :key="d.date" class="bot-hourly-bar-wrap" :title="d.date + ': ' + d.count">
+                      <div class="bot-hourly-bar" :style="{ height: Math.max(4, (d.count / Math.max(...botStats.daily.map((x: any) => x.count))) * 70) + 'px', background: '#2196f3' }"></div>
+                      <span class="bot-hourly-label">{{ d.date.slice(8) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="botStats.hourly?.length">
+                  <div style="font-size:13px;font-weight:600;margin-bottom:8px">По часам</div>
+                  <div class="bot-hourly-chart" style="height:100px;padding-bottom:24px">
+                    <div v-for="h in botStats.hourly" :key="h.hour" class="bot-hourly-bar-wrap" :title="h.hour + ':00 — ' + h.count">
+                      <div class="bot-hourly-bar" :style="{ height: Math.max(4, (h.count / Math.max(...botStats.hourly.map((x: any) => x.count))) * 70) + 'px' }"></div>
+                      <span class="bot-hourly-label">{{ h.hour }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- ── Спрос на растения ── -->
+          <div class="panel" v-if="botStats && (botStats.plantInterest?.length || botStats.cultivarInterest?.length)">
+            <h3>Спрос на растения</h3>
+            <p class="panel-desc">Какие растения и сорта интересуют людей больше всего</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px" class="bot-charts-grid">
+              <!-- By genus -->
+              <div v-if="botStats.plantInterest?.length">
+                <div style="font-size:12px;font-weight:600;color:#888;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.3px">По родам</div>
+                <div class="bot-demand-list">
+                  <div v-for="(p, i) in botStats.plantInterest" :key="i" class="bot-demand-row">
+                    <span class="bot-demand-bar" :style="{ width: (p.count / botStats.plantInterest[0].count * 100) + '%' }"></span>
+                    <span class="bot-demand-name">{{ p.name }}</span>
+                    <span class="bot-demand-count">{{ p.count }}</span>
+                  </div>
+                </div>
+              </div>
+              <!-- By cultivar -->
+              <div v-if="botStats.cultivarInterest?.length">
+                <div style="font-size:12px;font-weight:600;color:#888;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.3px">Конкретные сорта</div>
+                <div class="bot-demand-list">
+                  <div v-for="(p, i) in botStats.cultivarInterest.slice(0, 15)" :key="i" class="bot-demand-row">
+                    <span class="bot-demand-bar" :style="{ width: (p.count / botStats.cultivarInterest[0].count * 100) + '%', background: 'rgba(33,150,243,0.15)' }"></span>
+                    <span class="bot-demand-name">{{ p.name }}</span>
+                    <span class="bot-demand-count">{{ p.count }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Category interest -->
+            <div v-if="botStats.categoryInterest?.length" style="margin-top:16px">
+              <div style="font-size:12px;font-weight:600;color:#888;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.3px">Запросы наличия по категориям</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <span v-for="c in botStats.categoryInterest" :key="c.category" class="bot-cat-chip">{{ c.category }} <strong>{{ c.count }}</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Темы разговоров (intent clusters) ── -->
+          <div class="panel" v-if="botStats?.intentClusters?.length">
+            <h3>О чём спрашивают</h3>
+            <p class="panel-desc">Автоматическая группировка вопросов по темам. Один вопрос может быть задан 10 разными словами — здесь они объединены.</p>
+            <div class="bot-intent-list">
+              <div v-for="(ic, i) in botStats.intentClusters" :key="i" class="bot-intent-row">
+                <div class="bot-intent-header">
+                  <div class="bot-intent-bar-bg">
+                    <div class="bot-intent-bar-fill" :style="{ width: (ic.count / botStats.intentClusters[0].count * 100) + '%' }"></div>
+                  </div>
+                  <span class="bot-intent-name">{{ ic.intent }}</span>
+                  <span class="bot-intent-count">{{ ic.count }}</span>
+                </div>
+                <div class="bot-intent-examples">
+                  <span v-for="(ex, j) in ic.examples" :key="j" class="bot-intent-example">&laquo;{{ ex }}&raquo;</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Топ вопросов (с вариантами) ── -->
+          <div class="panel" v-if="botStats?.topQueries?.length">
+            <h3>Топ вопросов</h3>
+            <p class="panel-desc">Самые частые запросы с вариантами формулировок</p>
+            <div class="bot-top-queries">
+              <div v-for="(q, i) in botStats.topQueries" :key="i" class="bot-top-query-v2">
+                <div class="bot-top-query-main">
+                  <span class="bot-top-query-count">{{ q.count }}</span>
+                  <span>{{ q.query }}</span>
+                </div>
+                <div v-if="q.variants?.length > 1" class="bot-top-query-variants">
+                  <span v-for="(v, j) in q.variants.slice(1, 4)" :key="j" class="bot-top-query-variant">&laquo;{{ v }}&raquo;</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Пользователи ── -->
+          <div class="panel" v-if="botStats?.userBehavior?.powerUsers?.length">
+            <h3>Активные пользователи</h3>
+            <p class="panel-desc">{{ botStats.userBehavior.totalUsers }} всего, {{ botStats.userBehavior.returningUsers }} вернулись ({{ botStats.userBehavior.returningPct }}%)</p>
+            <div class="bot-users-table">
+              <div v-for="(u, i) in botStats.userBehavior.powerUsers" :key="i" class="bot-user-row">
+                <span class="bot-user-rank">#{{ i + 1 }}</span>
+                <span class="bot-ev-platform" :class="'bot-ev-' + u.platform" style="font-size:10px">{{ platformLabels[u.platform] }}</span>
+                <span class="bot-user-name">{{ u.name }}</span>
+                <span class="bot-user-msgs">{{ u.messages }} сообщ.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Event log ── -->
+          <div class="panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+              <h3 style="margin:0">Лог событий</h3>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <select v-model="botEventsFilter.platform" class="bot-filter-select" @change="loadBotEvents()">
+                  <option value="">Все платформы</option>
+                  <option value="max">Max.ru</option>
+                  <option value="tg">Telegram</option>
+                  <option value="vk">VK</option>
+                </select>
+                <select v-model="botEventsFilter.type" class="bot-filter-select" @change="loadBotEvents()">
+                  <option value="">Все типы</option>
+                  <option value="message">Сообщения</option>
+                  <option value="error">Ошибки</option>
+                  <option value="start">Старт</option>
+                </select>
+                <button class="btn-secondary" style="padding:6px 14px;font-size:12px" @click="loadBotEvents()">Обновить</button>
+              </div>
+            </div>
+
+            <div v-if="botEventsLoading" style="text-align:center;padding:20px;color:#888">Загрузка...</div>
+            <div v-else-if="!botEvents.length" style="text-align:center;padding:20px;color:#aaa;font-size:13px">Нет событий</div>
+            <div v-else class="bot-events-table-wrap">
+              <table class="bot-events-table">
+                <thead>
+                  <tr>
+                    <th>Время</th>
+                    <th>Платф.</th>
+                    <th>Польз.</th>
+                    <th>Запрос</th>
+                    <th>Ответ</th>
+                    <th>Время</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(ev, i) in botEvents" :key="i" :class="{ 'bot-event-error': ev.type === 'error', 'bot-event-start': ev.type === 'start' }">
+                    <td class="bot-ev-time">{{ formatBotDate(ev.ts) }}</td>
+                    <td><span class="bot-ev-platform" :class="'bot-ev-' + ev.platform">{{ platformLabels[ev.platform] || ev.platform }}</span></td>
+                    <td class="bot-ev-user">{{ ev.userName || ev.userId || '—' }}</td>
+                    <td class="bot-ev-text">
+                      <template v-if="ev.type === 'error'"><span style="color:#c62828">{{ ev.error || 'Ошибка' }}</span></template>
+                      <template v-else-if="ev.type === 'start'"><em style="color:#888">Запустил бота</em></template>
+                      <template v-else-if="ev.type === 'attachment'"><em style="color:#888">Отправил вложение</em></template>
+                      <template v-else>{{ ev.query || '—' }}</template>
+                    </td>
+                    <td class="bot-ev-text">{{ ev.response || '—' }}</td>
+                    <td class="bot-ev-latency">{{ ev.latencyMs ? (ev.latencyMs / 1000).toFixed(1) + 'с' : '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+            <!-- Catalog sync -->
+            <div class="panel">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+                <div>
+                  <h3 style="margin:0">Каталог rusinovsad.ru</h3>
+                  <p class="panel-desc" style="margin:0">Синхронизация ассортимента и наличия с сайта питомника (~1 мин)</p>
+                </div>
+                <button class="btn btn-primary" :disabled="catalogSyncing" @click="syncCatalog">
+                  {{ catalogSyncing ? 'Синхронизация...' : 'Синхронизировать каталог' }}
+                </button>
+              </div>
+              <div v-if="catalogSyncing" class="sync-progress">
+                <div class="sync-spinner"></div>
+                <span>Обходим 10 категорий на rusinovsad.ru, парсим наличие...</span>
+              </div>
+              <div v-if="catalogResult" class="sync-result" :class="catalogResult.ok ? 'sync-ok' : 'sync-err'">
+                <div v-if="catalogResult.ok" style="font-size:14px;font-weight:600;color:var(--primary)">
+                  Готово: {{ catalogResult.total }} товаров, {{ catalogResult.inStock }} в наличии
+                </div>
+                <pre v-if="catalogResult.logs" class="sync-logs">{{ catalogResult.logs }}</pre>
+              </div>
+            </div>
+
+          <!-- Prompt constructor header -->
+          <div class="page-head" style="margin-top:8px">
+            <h3 style="margin:0">Конструктор промпта</h3>
+            <button class="btn btn-primary" :disabled="botSaving" @click="saveBotPrompt">
+              {{ botSaving ? 'Сохраняю...' : 'Сохранить' }}
+            </button>
+          </div>
+
+          <div v-if="botLoading" style="text-align:center;padding:40px;color:#888">Загрузка...</div>
+
+          <template v-else-if="botPrompt">
+            <!-- Role -->
+            <div class="panel">
+              <h3>Роль бота</h3>
+              <p class="panel-desc">Описание роли и задачи бота — первая строка системного промпта</p>
+              <textarea v-model="botPrompt.role" class="field field-textarea" rows="3" placeholder="Ты — консультант питомника..." />
+            </div>
+
+            <!-- Tone -->
+            <div class="panel">
+              <h3>Тон и стиль</h3>
+              <p class="panel-desc">Как бот должен общаться с клиентами</p>
+              <textarea v-model="botPrompt.tone" class="field field-textarea" rows="3" placeholder="Профессиональный, дружелюбный..." />
+            </div>
+
+            <!-- Rules -->
+            <div class="panel">
+              <h3>Правила поведения</h3>
+              <p class="panel-desc">Каждое правило можно включить/выключить без удаления</p>
+              <div class="bot-rules">
+                <div v-for="(rule, i) in botPrompt.rules" :key="i" class="bot-rule" :class="{ disabled: !rule.enabled }">
+                  <div class="bot-rule-head">
+                    <label class="bot-rule-toggle">
+                      <input type="checkbox" v-model="rule.enabled">
+                      <span class="bot-rule-num">#{{ i + 1 }}</span>
+                    </label>
+                    <button class="btn-icon btn-icon-danger" title="Удалить" @click="removeBotRule(i)">&times;</button>
+                  </div>
+                  <textarea v-model="rule.text" class="field field-textarea field-sm" rows="2" placeholder="Текст правила..." />
+                </div>
+              </div>
+              <button class="btn btn-sm" style="margin-top:8px" @click="addBotRule">+ Добавить правило</button>
+            </div>
+
+            <!-- Fallback -->
+            <div class="panel">
+              <h3>Ответ по умолчанию</h3>
+              <p class="panel-desc">Что отвечать, когда информации нет в базе знаний</p>
+              <textarea v-model="botPrompt.fallbackResponse" class="field field-textarea" rows="3" />
+            </div>
+
+            <!-- Catalog links -->
+            <div class="panel">
+              <h3>Ссылки на каталог</h3>
+              <p class="panel-desc">Бот направляет клиентов в нужный раздел по названию культивара</p>
+              <div class="bot-catalog-links">
+                <div v-for="(link, i) in botPrompt.catalogLinks" :key="i" class="bot-catalog-row">
+                  <input v-model="link.category" class="field" placeholder="Категория" style="flex:1" />
+                  <input v-model="link.url" class="field" placeholder="URL" style="flex:1.5" />
+                  <button class="btn-icon btn-icon-danger" @click="removeCatalogLink(i)">&times;</button>
+                </div>
+              </div>
+              <button class="btn btn-sm" style="margin-top:8px" @click="addCatalogLink">+ Добавить ссылку</button>
+            </div>
+
+            <!-- Knowledge base -->
+            <div class="panel">
+              <h3>База знаний</h3>
+              <p class="panel-desc">Основная информация, на которую бот опирается при ответах</p>
+              <textarea v-model="botPrompt.knowledgeBase" class="field field-textarea field-kb" rows="16" />
+            </div>
+
+            <!-- Greeting & max length -->
+            <div class="panel">
+              <h3>Приветствие и лимиты</h3>
+              <div style="display:flex;gap:16px;flex-wrap:wrap">
+                <div style="flex:1;min-width:250px">
+                  <label class="field-label">Приветственное сообщение</label>
+                  <textarea v-model="botPrompt.greeting" class="field field-textarea" rows="2" />
+                </div>
+                <div style="width:150px">
+                  <label class="field-label">Макс. символов</label>
+                  <input v-model.number="botPrompt.maxLength" type="number" class="field" min="100" max="4000" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Save button bottom -->
+            <div style="text-align:right;margin-top:16px">
+              <button class="btn btn-primary btn-lg" :disabled="botSaving" @click="saveBotPrompt">
+                {{ botSaving ? 'Сохраняю...' : 'Сохранить изменения' }}
+              </button>
+            </div>
+          </template>
         </div>
 
       </main>
@@ -1429,4 +1904,126 @@ function formatDate(iso: string) {
 
 .btn-danger { padding: 10px 20px; background: #fff; border: 1.5px solid #d44; color: #d44; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; }
 .btn-danger:hover { background: #d44; color: #fff; }
+
+.field { padding: 8px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 13px; font-family: inherit; background: #fafbfc; transition: border-color 0.15s; box-sizing: border-box; }
+.field:focus { outline: none; border-color: var(--primary); background: #fff; }
+
+/* ── Bot prompt constructor ──── */
+.field-textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 13px; font-family: inherit; resize: vertical; line-height: 1.5; background: #fafbfc; transition: border-color 0.15s; }
+.field-textarea:focus { outline: none; border-color: var(--primary); background: #fff; }
+.field-textarea.field-sm { font-size: 12px; }
+.field-textarea.field-kb { font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; line-height: 1.6; min-height: 300px; }
+.field-label { display: block; font-size: 12px; font-weight: 600; color: #555; margin-bottom: 6px; }
+
+.bot-rules { display: flex; flex-direction: column; gap: 8px; }
+.bot-rule { background: #f8f9fa; border: 1px solid #e8e8e8; border-radius: 10px; padding: 12px; transition: opacity 0.15s; }
+.bot-rule.disabled { opacity: 0.5; }
+.bot-rule-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bot-rule-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: #555; }
+.bot-rule-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary); }
+.bot-rule-num { color: var(--primary); }
+
+.btn-icon { background: none; border: 1px solid #ddd; border-radius: 6px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; color: #999; transition: all 0.12s; }
+.btn-icon:hover { background: #f0f0f0; }
+.btn-icon-danger:hover { background: #fee; border-color: #d44; color: #d44; }
+
+.bot-catalog-links { display: flex; flex-direction: column; gap: 8px; }
+.bot-catalog-row { display: flex; gap: 8px; align-items: center; }
+
+.sync-progress { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 12px; background: #f0f7ff; border-radius: 8px; font-size: 13px; color: #555; }
+.sync-spinner { width: 18px; height: 18px; border: 2.5px solid #ddd; border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.sync-result { margin-top: 12px; padding: 12px; border-radius: 8px; }
+.sync-ok { background: #f0faf3; }
+.sync-err { background: #fef0f0; }
+.sync-logs { margin-top: 8px; padding: 8px; background: #1a1f2e; color: #a8d8a8; border-radius: 6px; font-size: 11px; font-family: monospace; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+
+.btn-lg { padding: 12px 32px; font-size: 15px; }
+.btn-sm { padding: 6px 14px; font-size: 12px; background: #f0f2f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; color: #555; }
+.btn-sm:hover { background: #e8eaed; }
+
+/* ── Bot dashboard ───────────── */
+.bot-platforms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.bot-platform-card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.bot-platform-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; }
+.bot-platform-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.bot-platform-dot.online { background: #4caf50; box-shadow: 0 0 6px rgba(76,175,80,0.5); }
+.bot-platform-dot.offline { background: #bbb; }
+.bot-platform-stats { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: #555; }
+
+.bot-period-tabs { display: flex; gap: 4px; }
+.bot-period-tab { padding: 5px 14px; border-radius: 16px; border: 1px solid #ddd; background: #fff; font-size: 12px; cursor: pointer; color: #666; transition: all 0.15s; }
+.bot-period-tab:hover { border-color: var(--primary); color: var(--primary); }
+.bot-period-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.bot-qtype-bar { display: flex; height: 20px; border-radius: 10px; overflow: hidden; background: #f0f2f5; }
+.bot-qtype-seg { min-width: 4px; transition: width 0.3s; }
+.bot-qtype-legend { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: #555; flex-wrap: wrap; }
+.bot-qtype-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+.bot-hourly-chart { display: flex; align-items: flex-end; gap: 3px; height: 80px; padding-bottom: 18px; position: relative; }
+.bot-hourly-bar-wrap { display: flex; flex-direction: column; align-items: center; flex: 1; }
+.bot-hourly-bar { width: 100%; max-width: 20px; background: var(--primary); border-radius: 3px 3px 0 0; opacity: 0.7; transition: height 0.3s; }
+.bot-hourly-label { font-size: 9px; color: #999; margin-top: 3px; }
+
+/* ── Demand / plant interest ── */
+.bot-demand-list { display: flex; flex-direction: column; gap: 3px; }
+.bot-demand-row { position: relative; display: flex; align-items: center; padding: 6px 10px; border-radius: 6px; overflow: hidden; }
+.bot-demand-bar { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(26,86,50,0.08); border-radius: 6px; transition: width 0.3s; }
+.bot-demand-name { position: relative; flex: 1; font-size: 13px; font-weight: 500; }
+.bot-demand-count { position: relative; font-size: 13px; font-weight: 700; color: var(--primary); min-width: 28px; text-align: right; }
+
+.bot-cat-chip { padding: 4px 12px; background: #f0f2f5; border-radius: 16px; font-size: 12px; color: #555; }
+.bot-cat-chip strong { color: var(--primary); margin-left: 4px; }
+
+/* ── Intent clusters ── */
+.bot-intent-list { display: flex; flex-direction: column; gap: 12px; }
+.bot-intent-row { }
+.bot-intent-header { display: flex; align-items: center; gap: 10px; position: relative; }
+.bot-intent-bar-bg { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: #f5f5f5; border-radius: 6px; }
+.bot-intent-bar-fill { height: 100%; background: rgba(33,150,243,0.12); border-radius: 6px; transition: width 0.3s; }
+.bot-intent-name { position: relative; flex: 1; font-size: 14px; font-weight: 600; padding: 6px 10px; }
+.bot-intent-count { position: relative; font-size: 14px; font-weight: 700; color: #1565c0; padding-right: 10px; }
+.bot-intent-examples { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; padding-left: 10px; }
+.bot-intent-example { font-size: 11px; color: #888; font-style: italic; }
+
+/* ── Top queries v2 ── */
+.bot-top-queries { display: flex; flex-direction: column; gap: 2px; }
+.bot-top-query-v2 { padding: 8px 0; border-bottom: 1px solid #f0f2f5; }
+.bot-top-query-main { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.bot-top-query-count { background: var(--primary); color: #fff; border-radius: 10px; padding: 2px 8px; font-size: 11px; font-weight: 700; min-width: 24px; text-align: center; flex-shrink: 0; }
+.bot-top-query-variants { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; padding-left: 36px; }
+.bot-top-query-variant { font-size: 11px; color: #999; font-style: italic; }
+
+/* ── Users table ── */
+.bot-users-table { display: flex; flex-direction: column; gap: 2px; }
+.bot-user-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; }
+.bot-user-rank { color: #aaa; font-weight: 600; min-width: 24px; }
+.bot-user-name { flex: 1; font-weight: 500; }
+.bot-user-msgs { color: var(--primary); font-weight: 600; }
+
+.bot-filter-select { padding: 5px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; background: #fff; color: #555; }
+
+.bot-events-table-wrap { overflow-x: auto; margin: 0 -20px; padding: 0 20px; }
+.bot-events-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.bot-events-table th { text-align: left; padding: 8px 6px; border-bottom: 2px solid #eee; color: #888; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+.bot-events-table td { padding: 7px 6px; border-bottom: 1px solid #f5f5f5; vertical-align: top; }
+.bot-events-table tbody tr:hover { background: #fafafa; }
+.bot-event-error { background: #fff5f5 !important; }
+.bot-event-error:hover { background: #ffebee !important; }
+.bot-event-start { color: #888; }
+.bot-ev-time { white-space: nowrap; color: #888; font-size: 11px; }
+.bot-ev-platform { padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600; }
+.bot-ev-max { background: #e3f2fd; color: #1565c0; }
+.bot-ev-tg { background: #e0f7fa; color: #00838f; }
+.bot-ev-vk { background: #ede7f6; color: #4527a0; }
+.bot-ev-user { color: #555; white-space: nowrap; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+.bot-ev-text { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-ev-latency { white-space: nowrap; color: #888; }
+
+@media (max-width: 768px) {
+  .bot-platforms { grid-template-columns: 1fr; }
+  .bot-charts-grid { grid-template-columns: 1fr !important; }
+  .bot-ev-text { max-width: 120px; }
+}
 </style>
