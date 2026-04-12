@@ -19,7 +19,7 @@ const formattedDate = computed(() => {
 
 <template>
   <div v-if="formattedDate" class="update-bar container">
-    <div class="update-inner">
+    <NuxtLink :to="newCount > 0 ? '/catalog?new=1' : '/catalog'" class="update-inner">
       <span class="update-dot" />
       <span class="update-text">
         Каталог обновлён {{ formattedDate }}
@@ -27,7 +27,7 @@ const formattedDate = computed(() => {
       <span v-if="newCount > 0" class="update-new">
         +{{ newCount }} новых
       </span>
-    </div>
+    </NuxtLink>
   </div>
 </template>
 
@@ -37,13 +37,22 @@ const formattedDate = computed(() => {
 }
 
 .update-inner {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
   background: var(--bg-alt);
   border-radius: 20px;
   width: fit-content;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+
+.update-inner:hover {
+  background: var(--border-light);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
 .update-dot {
@@ -60,11 +69,19 @@ const formattedDate = computed(() => {
 }
 
 .update-new {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  color: #ff6d00;
-  background: #fff3e0;
-  padding: 2px 8px;
-  border-radius: 10px;
+  color: #fff;
+  background: #ff6d00;
+  padding: 5px 14px;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(255, 109, 0, 0.3);
+  transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.update-inner:hover .update-new {
+  background: #e65100;
+  transform: scale(1.05);
+  box-shadow: 0 3px 12px rgba(255, 109, 0, 0.4);
 }
 </style>

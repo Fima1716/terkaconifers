@@ -14,10 +14,14 @@ export default defineEventHandler(() => {
     totalSynced = state.total_synced || 0
   }
 
-  // Count plants with is_new flag
+  // Count plants with is_new flag, respecting garden consent filter
   let newCount = 0
   if (existsSync(catalogPath)) {
-    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'))
+    let catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'))
+    const consented = getConsentedGardens()
+    if (consented && consented.size > 0) {
+      catalog = catalog.filter((p: any) => consented.has(p.garden_display))
+    }
     newCount = catalog.filter((p: any) => p.is_new).length
   }
 

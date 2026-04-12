@@ -48,16 +48,20 @@ interface BotState {
   midMap: Record<string, { userId: number; chatId: number; userName: string; photos?: string[] }>
   // Pending publication: admin accepted, waiting for edited text to post to catalog channel
   pendingPublish: Record<string, { photos: string[]; userName: string; aiText?: string }>
+  // Pending edit: admin wants to edit a post in catalog channel
+  pendingEdit: Record<string, { channelMid: string; plantId: number; url: string }>
+  // Garden ownership: userId → { garden name, plant count }
+  gardenOwners: Record<string, { garden: string; count: number }>
 }
 
 function loadState(): BotState {
   if (existsSync(STATE_FILE)) {
     try {
       const s = JSON.parse(readFileSync(STATE_FILE, 'utf-8'))
-      return { consented: s.consented || {}, banned: s.banned || {}, midMap: s.midMap || {}, pendingPublish: s.pendingPublish || {} }
+      return { consented: s.consented || {}, banned: s.banned || {}, midMap: s.midMap || {}, pendingPublish: s.pendingPublish || {}, pendingEdit: s.pendingEdit || {}, gardenOwners: s.gardenOwners || {} }
     } catch {}
   }
-  return { consented: {}, banned: {}, midMap: {}, pendingPublish: {} }
+  return { consented: {}, banned: {}, midMap: {}, pendingPublish: {}, pendingEdit: {}, gardenOwners: {} }
 }
 
 function saveState(s: BotState) {
@@ -82,6 +86,115 @@ function isDuplicate(mid: string): boolean {
   return false
 }
 
+// ── Памятка (admin help topics) ───────────────────────────
+const MEMO_TOPICS: Record<string, { title: string; text: string }> = {
+  memo_flow: {
+    title: '📨 Как приходят заявки',
+    text: `📨 Как приходят заявки
+
+Пользователь отправляет боту фото + описание растения → бот пересылает всё в «Корзину Терки» с фото и текстом.
+
+💡 Сообщения с фото — это заявки.
+Текстовые сообщения без фото — это дополнения/уточнения, не заявки.`,
+  },
+  memo_accept: {
+    title: '✅ Принять / Отклонить',
+    text: `✅❌ Принять / Отклонить / Ответить
+
+Найдите сообщение с фото от бота и ответьте на него (зажать → «Ответить»):
+
+✅ «+» → принять заявку
+Бот возьмёт фото из этого сообщения, ИИ отформатирует текст и предложит вариант.
+
+❌ «−» → отклонить заявку
+Пользователь получит вежливый отказ.
+
+💬 Любой другой текст → написать пользователю
+Ваше сообщение будет переслано автору заявки от имени Лешего.
+
+❗ Отвечайте + только на сообщение С ФОТО — именно оттуда берутся фотографии для публикации.`,
+  },
+  memo_after: {
+    title: '📢 После принятия',
+    text: `📢 После принятия (+)
+
+Бот предложит отформатированный текст для канала:
+• «ок» → опубликовать текст как есть
+• свой текст → опубликовать ваш вариант
+
+❗ Проверяйте текст от ИИ!
+ИИ не всегда корректно обрабатывает информацию. Сверяйте с тем, что написал пользователь, и дополняйте важными деталями перед публикацией.`,
+  },
+  memo_edit: {
+    title: '📝 Редактировать пост',
+    text: `📝 Редактировать пост в канале
+
+1. Найдите пост в канале «Территория хвойных. Каталог», скопируйте ссылку
+2. Напишите в «Корзину Терки»:
+   леший ССЫЛКА
+
+Например: леший https://max.ru/id592005855318_biz/AZ1guYWCDXM
+
+3. Бот найдёт пост и покажет текущий текст
+4. Ответьте на сообщение бота новым текстом — бот заменит текст в канале
+5. После замены бот пришлёт превью с фото и ссылкой
+
+❗ Фото не меняются — редактируется только текст.
+Изменения на сайте появятся на следующий день после ночной синхронизации.`,
+  },
+  memo_update: {
+    title: '🔄 Обновить карточку',
+    text: `🔄 Обновить карточку растения
+
+Если растение выросло — заводим новую карточку:
+
+1. Идём в бота
+2. Отправляем новое фото + обновлённую информацию (новый возраст, размер и т.д.)
+3. В Корзине проверяем текст
+4. Публикуем как обычно
+
+Пример: возраст 7–8 лет → обновляем до 10 лет.`,
+  },
+  memo_commands: {
+    title: '🤖 Команды бота',
+    text: `🤖 Команды бота
+
+В «Корзине Терки»:
+• памятка — эта справка
+• леший ССЫЛКА — редактировать пост в канале
+• /last — последние публикации
+• /last 20 — показать 20 последних
+• /удалить N — удалить публикацию №N из канала
+
+В ЛС бота (пишет пользователь):
+• /start — правила и согласие
+• /help — справка
+• мой сад — код для входа в личный кабинет`,
+  },
+}
+
+function memoMenuAttachment() {
+  return {
+    type: 'inline_keyboard',
+    payload: {
+      buttons: [
+        [
+          { type: 'callback', text: '📨 Заявки', payload: 'memo_flow' },
+          { type: 'callback', text: '✅ Принять/Отклонить', payload: 'memo_accept' },
+        ],
+        [
+          { type: 'callback', text: '📢 После принятия', payload: 'memo_after' },
+          { type: 'callback', text: '📝 Редактировать', payload: 'memo_edit' },
+        ],
+        [
+          { type: 'callback', text: '🔄 Обновить карточку', payload: 'memo_update' },
+          { type: 'callback', text: '🤖 Команды', payload: 'memo_commands' },
+        ],
+      ],
+    },
+  }
+}
+
 // ── API ────────────────────────────────────────────────────
 const H = { Authorization: TOKEN, 'Content-Type': 'application/json' }
 
@@ -99,6 +212,15 @@ async function answerCallback(cbId: string, note?: string) {
   await fetch(`${BASE_URL}/answers/callback?callback_id=${cbId}`, {
     method: 'POST', headers: H, body: JSON.stringify(note ? { notification: note } : {}),
   })
+}
+
+async function editMessage(mid: string, chatId: string | number, text: string, attachments?: any[]) {
+  const body: any = { text }
+  if (attachments) body.attachments = attachments
+  const resp = await fetch(`${BASE_URL}/messages?message_id=${mid}&chat_id=${chatId}`, {
+    method: 'PUT', headers: H, body: JSON.stringify(body),
+  })
+  return resp.ok
 }
 
 async function deleteMessage(mid: string): Promise<boolean> {
@@ -247,7 +369,8 @@ async function process(update: any) {
   if (String(eventChatId) === PROTECTED_CATALOG_ID) return
 
   // Dedup: skip if we already processed this update
-  const dedupId = update.message?.body?.mid || update.message?.mid || update.timestamp
+  // For callbacks, use callback_id (unique per click); for messages, use mid
+  const dedupId = update.callback?.callback_id || update.message?.body?.mid || update.message?.mid || update.timestamp
   if (dedupId && isDuplicate(String(dedupId))) return
 
   // Blue "START" button — treat as /start
@@ -268,9 +391,10 @@ async function process(update: any) {
     return
   }
 
-  // Consent button
+  // Callback buttons
   if (type === 'message_callback') {
     const cb = update.callback
+    log(`Callback: payload=${cb?.payload}, mid=${update.message?.body?.mid}, chat=${update.message?.recipient?.chat_id || update.chat_id}`)
     if (cb?.payload === 'consent_agree') {
       const uid = String(cb?.user?.user_id || update.user_id)
       const cbChatId = update.message?.recipient?.chat_id || update.chat_id
@@ -285,6 +409,21 @@ async function process(update: any) {
       saveState(state)
       if (cbChatId) await send(cbChatId, CONSENT_OK)
       log(`Consent: user ${uid}`)
+      return
+    }
+    // Памятка topic buttons — edit the same message in place
+    const memoTopic = MEMO_TOPICS[cb?.payload]
+    if (memoTopic) {
+      const msgMid = update.message?.body?.mid
+      const cbChatId = update.message?.recipient?.chat_id || update.chat_id
+      await answerCallback(cb.callback_id)
+      if (msgMid && cbChatId) {
+        const ok = await editMessage(msgMid, cbChatId, memoTopic.text, [memoMenuAttachment()])
+        log(`Memo edit: topic=${cb.payload}, mid=${msgMid}, ok=${ok}`)
+      } else {
+        log(`Memo edit SKIP: msgMid=${msgMid}, cbChatId=${cbChatId}`)
+      }
+      return
     }
     return
   }
@@ -355,11 +494,150 @@ async function process(update: any) {
       return
     }
 
+    // ── "памятка" — interactive admin help ──
+    if (/^(леший\s+)?памятка$/i.test(text.trim())) {
+      await send(ADMIN_CHAT_ID, '📋 Памятка Лешего\n\nВыберите тему:', [memoMenuAttachment()])
+      log(`Memo requested by ${name}`)
+      return
+    }
+
+    // ── "Леший ССЫЛКА": edit post in catalog channel ──
+    const maxLinkMatch = /леший\s+(https?:\/\/max\.ru\/[^\s]+)/i.exec(text)
+    if (maxLinkMatch) {
+      const url = maxLinkMatch[1]
+      // Extract short message ID (last path segment)
+      const shortId = url.split('/').pop()
+      if (shortId) {
+        try {
+          // 1. Try finding in local catalog first
+          const catalogPath = resolve(ROOT, 'data/raw/catalog.json')
+          const catalog = existsSync(catalogPath) ? JSON.parse(readFileSync(catalogPath, 'utf-8')) : []
+          const plant = catalog.find((p: any) => p.max_url && p.max_url.includes(shortId))
+
+          let channelMid = ''
+          let currentText = ''
+          let label = ''
+
+          if (plant) {
+            channelMid = plant._mid
+            label = `${plant.latin_full} (id: ${plant._site_id})`
+            // Reconstruct current text from catalog fields
+            currentText = plant.latin_full || ''
+            if (plant.name_ru) currentText += `\n${plant.name_ru}`
+            currentText += '\n'
+            if (plant.region) currentText += `\n${plant.region}`
+            if (plant.age) currentText += `\nВозраст: ${plant.age}`
+            if (plant.garden) currentText += `\n${plant.garden}`
+            if (plant.hashtags?.length) currentText += `\n${plant.hashtags.map((h: string) => `#${h}`).join('\n')}`
+          }
+
+          // 2. Fallback: fetch recent messages from channel to find the post
+          if (!channelMid) {
+            await send(ADMIN_CHAT_ID, `🔍 Поста нет в каталоге, ищу в канале...`)
+            let found = false
+            let fromTs: number | null = null
+
+            for (let page = 0; page < 5 && !found; page++) {
+              const params = new URLSearchParams({ chat_id: PROTECTED_CATALOG_ID, count: '100' })
+              if (fromTs) params.set('from', String(fromTs))
+              const resp = await fetch(`${BASE_URL}/messages?${params}`, { headers: { Authorization: TOKEN } })
+              if (!resp.ok) break
+              const data: any = await resp.json()
+              const messages = data.messages || []
+              if (!messages.length) break
+
+              for (const m of messages) {
+                const msgUrl: string = m.url || m.link || ''
+                if (msgUrl.includes(shortId)) {
+                  channelMid = m.body?.mid || ''
+                  currentText = m.body?.text || '(пустой текст)'
+                  label = currentText.split('\n')[0] || 'пост'
+                  found = true
+                  break
+                }
+              }
+
+              const lastTs = messages[messages.length - 1]?.timestamp
+              if (!lastTs || messages.length < 100) break
+              fromTs = lastTs - 1
+              await new Promise(r => setTimeout(r, 200))
+            }
+          }
+
+          if (channelMid) {
+            const askText = `📝 Нашёл пост:\n——————\n${currentText}\n——————\n\n🆔 ${label}\n\n📌 Ответьте на ЭТО сообщение новым текстом — я заменю текст в канале.`
+            const askResult: any = await send(ADMIN_CHAT_ID, askText)
+            const askMid = askResult?.message?.body?.mid
+
+            if (askMid) {
+              state.midMap[askMid] = { userId: 0, chatId: 0, userName: '' }
+              ;state.pendingEdit[askMid] = {
+                channelMid,
+                plantId: plant?._site_id || 0,
+                url,
+              }
+              saveState(state)
+            }
+            log(`Edit request: ${label} by ${name}`)
+          } else {
+            await send(ADMIN_CHAT_ID, `⚠️ Пост не найден ни в каталоге, ни в последних 500 сообщениях канала.\nПроверьте ссылку.`)
+          }
+        } catch (e) {
+          log(`Edit link error: ${e}`)
+          await send(ADMIN_CHAT_ID, `❌ Ошибка при поиске поста: ${e}`)
+        }
+      }
+      return
+    }
+
     const replyMid = msg.link?.type === 'reply' ? msg.link.message?.mid : undefined
     if (!replyMid) return
 
     const target = state.midMap[replyMid]
     if (!target) return
+
+    // ── Handle pending edit reply ──
+    const pendingEdit = state.pendingEdit[replyMid]
+    if (pendingEdit && text) {
+      try {
+        const editResp = await fetch(`${BASE_URL}/messages?message_id=${pendingEdit.channelMid}&chat_id=${PROTECTED_CATALOG_ID}`, {
+          method: 'PUT', headers: H,
+          body: JSON.stringify({ text }),
+        })
+        if (editResp.ok) {
+          // Fetch the updated post from channel to show full preview with photos
+          let preview = `✅ Текст поста обновлён!\n——————\n${text}\n——————\n🔗 ${pendingEdit.url}`
+          let previewAttachments: any[] | undefined
+          try {
+            const msgResp = await fetch(`${BASE_URL}/messages?message_id=${pendingEdit.channelMid}`, {
+              headers: { Authorization: TOKEN },
+            })
+            if (msgResp.ok) {
+              const msgData: any = await msgResp.json()
+              const m = msgData.message || msgData
+              const photos: any[] = []
+              for (const att of (m.body?.attachments || [])) {
+                if (att.type === 'image' && att.payload?.url) {
+                  photos.push({ type: 'image', payload: { url: att.payload.url } })
+                }
+              }
+              if (photos.length) previewAttachments = photos
+            }
+          } catch {}
+          await send(ADMIN_CHAT_ID, preview, previewAttachments)
+          log(`Edited post: ${pendingEdit.plantId} by ${name}`)
+        } else {
+          const err = await editResp.text()
+          await send(ADMIN_CHAT_ID, `❌ Не удалось отредактировать: ${editResp.status}\n${err}`)
+        }
+      } catch (e) {
+        await send(ADMIN_CHAT_ID, `❌ Ошибка: ${e}`)
+      }
+      delete state.pendingEdit[replyMid]
+      delete state.midMap[replyMid]
+      saveState(state)
+      return
+    }
 
     // /ban
     if (text === '/ban') {
@@ -456,6 +734,26 @@ async function process(update: any) {
       const firstLine = publishText.split('\n').filter(Boolean)[0] || ''
       if (parsed) addPublication(parsed.normalized, '', 'max', { channelMid, text: firstLine, author: pending.userName })
 
+      // Track garden ownership: userId → garden name
+      const gardenName = extractGarden(publishText)
+      if (gardenName && target.userId) {
+        const gardenDisplay = gardenName.replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2') // "РусиновСад" → "Русинов Сад"
+        const uidStr = String(target.userId)
+        const existing = state.gardenOwners[uidStr]
+        if (existing && existing.garden === gardenDisplay) {
+          existing.count++
+        } else if (!existing) {
+          state.gardenOwners[uidStr] = { garden: gardenDisplay, count: 1 }
+        }
+        // Suggest garden management at 30+ plants
+        if (state.gardenOwners[uidStr]?.count === 30) {
+          await send(target.chatId,
+            `🎉 У вас уже 30 растений в каталоге!\n\n` +
+            `Вы можете управлять своим садом на сайте terkaconifers.ru — вести дневник роста, добавлять фото и замеры.\n\n` +
+            `Напишите мне «мой сад» чтобы получить код для входа.`)
+        }
+      }
+
       delete state.pendingPublish[replyMid]
       saveState(state)
       log(`Published to channel: ${publishText.substring(0, 50)} (${pending.photos.length} photos, from ${pending.userName})`)
@@ -506,6 +804,29 @@ async function process(update: any) {
       await send(chatId, '🔓 Согласие отозвано. Напишите /start чтобы начать заново.')
     } else {
       await send(chatId, 'Вы ещё не давали согласие.')
+    }
+    return
+  }
+
+  // "мой сад" — generate garden access code
+  if (/^мой сад$/i.test(text.trim())) {
+    const uidStr = String(uid)
+    const ownership = state.gardenOwners[uidStr]
+    if (ownership && ownership.garden) {
+      // Generate 6-digit code
+      const CODES_PATH = resolve(ROOT, 'data/garden-codes.json')
+      let codes: any[] = []
+      if (existsSync(CODES_PATH)) try { codes = JSON.parse(readFileSync(CODES_PATH, 'utf-8')) } catch {}
+      codes = codes.filter((c: any) => c.expiresAt > Date.now())
+      codes = codes.filter((c: any) => c.garden !== ownership.garden) // remove old codes for this garden
+      const code = String(Math.floor(100000 + Math.random() * 900000))
+      codes.push({ code, garden: ownership.garden, expiresAt: Date.now() + 15 * 60 * 1000 })
+      writeFileSync(CODES_PATH, JSON.stringify(codes, null, 2))
+
+      await send(chatId, `🌲 Ваш сад: «${ownership.garden}» (${ownership.count} растений)\n\n🔑 Код для входа: ${code}\n\nВведите его на terkaconifers.ru/my-garden\nКод действует 15 минут.`)
+      log(`Garden code generated: ${ownership.garden} for uid ${uidStr}`)
+    } else {
+      await send(chatId, '🤔 Не нашёл ваш сад. Отправьте заявки с растениями через бота — после публикации ваш сад появится автоматически.')
     }
     return
   }

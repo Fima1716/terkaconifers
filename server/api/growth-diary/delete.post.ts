@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
 import { resolve } from 'path'
 
 const DATA_PATH = resolve(process.cwd(), 'data/growth-diary.json')
-const UPLOAD_DIR = resolve(process.cwd(), 'public/uploads/growth')
+const UPLOAD_DIR = resolve(process.cwd(), 'data/uploads/growth')
 
 export default defineEventHandler(async (event) => {
   await requireAuth(event, 'super_admin')

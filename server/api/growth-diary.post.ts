@@ -3,12 +3,15 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs'
 import { resolve } from 'path'
 
 const DATA_PATH = resolve(process.cwd(), 'data/growth-diary.json')
-const UPLOAD_DIR = resolve(process.cwd(), 'public/uploads/growth')
+const UPLOAD_DIR = resolve(process.cwd(), 'data/uploads/growth')
 
 // Rate limit
 const lastPost = new Map<string, number>()
 
 export default defineEventHandler(async (event) => {
+  // Require garden access (admin or owner via cookie)
+  const access = await requireGardenAccess(event)
+
   const ip = getHeader(event, 'x-real-ip') || getHeader(event, 'x-forwarded-for') || 'unknown'
   const now = Date.now()
   if (lastPost.has(ip) && now - lastPost.get(ip)! < 30000) {
@@ -32,10 +35,21 @@ export default defineEventHandler(async (event) => {
 
   const plantId = parseInt(fields.plantId || '0')
   const year = parseInt(fields.year || '0')
-  const authorContact = String(fields.authorContact || '').trim().slice(0, 100)
   const comment = String(fields.comment || '').trim().slice(0, 300)
 
   if (!plantId) throw createError({ statusCode: 400, message: 'Не указано растение' })
+
+  // Owners can only add diary for their garden's plants
+  if (!access.isAdmin) {
+    const catalogPath = resolve(process.cwd(), 'data/catalog-enriched.json')
+    if (existsSync(catalogPath)) {
+      const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'))
+      const plant = catalog.find((p: any) => p.id === plantId)
+      if (!plant || plant.garden_display !== access.garden) {
+        throw createError({ statusCode: 403, message: 'Это растение не из вашего сада' })
+      }
+    }
+  }
   if (year < 1990 || year > new Date().getFullYear()) throw createError({ statusCode: 400, message: 'Некорректный год' })
   if (!imageFile) throw createError({ statusCode: 400, message: 'Добавьте фото' })
 
@@ -56,7 +70,7 @@ export default defineEventHandler(async (event) => {
     plantId,
     year,
     photoFilename,
-    authorContact,
+    authorContact: access.garden || 'admin',
     comment,
     createdAt: new Date().toISOString(),
   }

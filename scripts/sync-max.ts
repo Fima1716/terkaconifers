@@ -420,10 +420,14 @@ async function main() {
       // All existing have URLs — skip if exact garden matches or if no URL-less entries remain
       const hasExactGarden = allByLatin.some(([k]) => k === key)
       if (hasExactGarden) continue
-      // If there are existing entries with same latin AND same region — likely same plant, different garden spelling
-      if (plant.region) {
-        const sameRegion = allByLatin.find(([, v]) => v.region && plant.region.includes(v.region.split(',')[0]))
-        if (sameRegion) continue
+      // If there are existing entries with same latin AND same region AND same garden — likely same plant
+      // Only skip if garden also matches (different gardens in same region = different plants)
+      if (plant.region && plant.garden) {
+        const sameRegionAndGarden = allByLatin.find(([, v]) =>
+          v.region && plant.region.includes(v.region.split(',')[0]) &&
+          v.garden && v.garden === plant.garden
+        )
+        if (sameRegionAndGarden) continue
       }
     }
 

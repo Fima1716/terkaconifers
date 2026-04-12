@@ -9,75 +9,88 @@ useHead({
   link: [{ rel: 'stylesheet', href: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' }],
 })
 
-// Region → coordinates
-const COORDS: Record<string, [number, number]> = {
-  'Московская область': [55.75, 37.62],
-  'г.Москва': [55.76, 37.64],
-  'Пермский край': [58.01, 56.25],
-  'Омская область': [54.99, 73.37],
-  'Свердловская область': [56.84, 60.60],
-  'Иркутская область': [52.29, 104.28],
-  'Томская область': [56.50, 84.97],
-  'Ленинградская область': [59.93, 30.32],
-  'Республика Татарстан': [55.80, 49.11],
-  'Псковская область': [57.82, 28.33],
-  'Ростовская область': [47.24, 39.72],
-  'Республика Марий Эл': [56.63, 47.89],
-  'Белгородская область': [50.60, 36.59],
-  'Краснодарский край': [45.04, 38.98],
-  'Калининградская область': [54.71, 20.51],
-  'Нижегородская область': [56.33, 44.00],
-  'Новосибирская область': [55.03, 82.92],
-  'Красноярский край': [56.01, 92.87],
-  'Приморский край': [43.12, 131.88],
-  'Тульская область': [54.19, 37.62],
-  'Челябинская область': [55.16, 61.40],
-  'Владимирская область': [56.13, 40.42],
-  'Ярославская область': [57.63, 39.87],
-  'Тверская область': [56.86, 35.90],
-  'Курская область': [51.73, 36.19],
-  'Воронежская область': [51.67, 39.21],
-  'Волгоградская область': [48.71, 44.51],
-  'Ставропольский край': [45.04, 43.97],
-  'Республика Адыгея': [44.61, 40.10],
-  'Беларусь': [53.90, 27.57],
-  'ДНР': [48.00, 37.80],
-  'Уфа': [54.74, 55.97],
-  'Урал': [56.84, 60.60],
+// Geocoded coordinates (fetched from cache)
+const geocodes = ref<Record<string, [number, number]>>({})
+const geocodesLoaded = ref(false)
+
+onMounted(async () => {
+  try {
+    const data = await $fetch<Record<string, [number, number]>>('/api/geocodes')
+    geocodes.value = data || {}
+  } catch {}
+  geocodesLoaded.value = true
+})
+
+// Normalize district spelling to match geocodes cache keys
+const DISTRICT_NORM: Record<string, string> = {
+  'Сергиево Посадский район': 'Сергиево-Посадский район',
+  'Сергиево-Посадский р-н': 'Сергиево-Посадский район',
+  'Сергиево- Посадский район': 'Сергиево-Посадский район',
+  'Сергиево_Посадский район': 'Сергиево-Посадский район',
+  'Сергиево - Посадский район': 'Сергиево-Посадский район',
+  'Лотошинский р-н': 'Лотошинский район',
+  'г. Миасс': 'г.Миасс',
+  'г. Пятигорск': 'г.Пятигорск',
+  'г. Иркутск': 'г.Иркутск',
+  'г. Ростов-на-Дону': 'г.Ростов-на-Дону',
+  'Ростов-на-Дону': 'г.Ростов-на-Дону',
+  'г. Черноголовка': 'Черноголовка',
+  'г. Химки': 'Химкинский район',
+  'Чеховский  район': 'Чеховский район',
+  'Чеховский раон': 'Чеховский район',
+  'г. Чайковский': 'Чайковский',
+  'г. Щёлково': 'Щёлковский район',
+  'г. Покров': 'г.Покров',
+  'г. Дорогобуж': 'г.Дорогобуж',
+}
+
+function resolveCoords(region: string, district: string): [number, number] | null {
+  const geo = geocodes.value
+  const nd = DISTRICT_NORM[district] || district
+  // Try region+district first (most precise)
+  if (nd) {
+    const key = `${region}|${nd}`
+    if (geo[key]) return geo[key]
+  }
+  // Fallback to region only
+  return geo[region] || null
 }
 
 // Build garden data from catalog
 interface GardenPin {
   name: string
   region: string
+  district: string
   count: number
   coords: [number, number]
   genera: string[]
 }
 
 const gardens = computed<GardenPin[]>(() => {
-  if (!catalog.isLoaded) return []
-  const map = new Map<string, { region: string; count: number; genera: Set<string>; displayName: string }>()
+  if (!catalog.isLoaded || !geocodesLoaded.value) return []
+  const map = new Map<string, { region: string; district: string; count: number; genera: Set<string>; displayName: string }>()
   for (const p of catalog.catalog) {
     const g = p.garden_display
     if (!g) continue
     const region = p.region_normalized || ''
-    // "Частные сады" — split by region, each becomes separate pin
+    const district = p.region_district || ''
+    // "Частные сады" — split by region+district, each becomes separate pin
     const isPrivate = g === 'Частные сады' || g === 'Частный сад'
-    const key = isPrivate ? `Частный сад|${region}` : g
-    if (!map.has(key)) map.set(key, { region, count: 0, genera: new Set(), displayName: isPrivate ? 'Частный сад' : g } )
+    const key = isPrivate ? `Частный сад|${region}|${district}` : g
+    if (!map.has(key)) map.set(key, { region, district, count: 0, genera: new Set(), displayName: isPrivate ? 'Частный сад' : g })
     const entry = map.get(key)!
     entry.count++
     if (p.genus_ru) entry.genera.add(p.genus_ru)
   }
   const pins: GardenPin[] = []
   for (const [key, data] of map) {
-    const coords = COORDS[data.region]
+    const coords = resolveCoords(data.region, data.district)
     if (!coords) continue
     const jitter = (s: string) => { let h = 0; for (const c of s) h = ((h << 5) - h + c.charCodeAt(0)) | 0; return (h % 100) / 500 }
     pins.push({
       name: data.displayName || key,
       region: data.region,
+      district: data.district,
       count: data.count,
       coords: [coords[0] + jitter(key), coords[1] + jitter(key + 'x')],
       genera: [...data.genera].slice(0, 5),
@@ -86,9 +99,46 @@ const gardens = computed<GardenPin[]>(() => {
   return pins
 })
 
+// Search
+const searchQuery = ref('')
+const searchFocused = ref(false)
+const searchRef = ref<HTMLElement>()
+
+const searchResults = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q || q.length < 2) return []
+  return gardens.value
+    .filter(g => {
+      const loc = g.district ? `${g.district} ${g.region}` : g.region
+      return g.name.toLowerCase().includes(q) || loc.toLowerCase().includes(q)
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8)
+})
+
+function selectGarden(g: GardenPin) {
+  searchQuery.value = ''
+  // Don't set searchFocused=false — input stays focused, dropdown hides because query is empty
+  const marker = markerMap.get(g)
+  if (marker && leafletMap) {
+    leafletMap.flyTo(g.coords, 9, { duration: 0.8 })
+    setTimeout(() => marker.openPopup(), 850)
+  }
+}
+
+// Close dropdown on outside click
+onMounted(() => {
+  document.addEventListener('click', (e) => {
+    if (searchRef.value && !searchRef.value.contains(e.target as Node)) {
+      searchFocused.value = false
+    }
+  })
+})
+
 // Init map
 const mapRef = ref<HTMLElement>()
 let leafletMap: any = null
+const markerMap = new Map<GardenPin, any>()
 
 async function initMap() {
   if (!mapRef.value || leafletMap) return
@@ -120,20 +170,26 @@ function addMarkers() {
   const L = (window as any).L
   if (!L) return
 
+  // Clear old markers
+  markerMap.forEach(m => m.remove())
+  markerMap.clear()
+
   const icon = L.divIcon({ className: 'garden-marker', iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -10] })
   const bigIcon = L.divIcon({ className: 'garden-marker garden-marker-big', iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -12] })
 
   for (const g of gardens.value) {
     const marker = L.marker(g.coords, { icon: g.count > 50 ? bigIcon : icon }).addTo(leafletMap)
+    const location = g.district ? `${g.district}, ${g.region}` : g.region
     marker.bindPopup(`
       <div style="min-width:180px">
         <strong style="font-size:14px">${g.name}</strong><br>
-        <span style="font-size:12px;color:#666">${g.region}</span><br>
+        <span style="font-size:12px;color:#666">${location}</span><br>
         <span style="font-size:13px;font-weight:600;color:#1a5632">${g.count} растений</span><br>
         <span style="font-size:11px;color:#999">${g.genera.join(', ')}</span><br>
         <a href="/garden/${encodeURIComponent(g.name)}" style="font-size:12px;color:#1a5632;font-weight:600;margin-top:6px;display:inline-block">Открыть сад →</a>
       </div>
     `, { closeButton: false })
+    markerMap.set(g, marker)
   }
 }
 
@@ -158,8 +214,32 @@ watch(gardens, () => {
   <div class="map-page">
     <div class="map-header container">
       <BreadCrumbs :items="[{ label: 'Главная', to: '/' }, { label: 'Карта садов' }]" />
-      <h1>Карта садов</h1>
-      <p class="map-subtitle">{{ gardens.length }} садов по всей России</p>
+      <div class="map-title-row">
+        <div>
+          <h1>Карта садов</h1>
+          <p class="map-subtitle">{{ gardens.length }} садов по всей России</p>
+        </div>
+        <div ref="searchRef" class="map-search">
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="Найти сад или регион..."
+            class="map-search-input"
+            @focus="searchFocused = true"
+          >
+          <div v-if="searchFocused && searchResults.length" class="map-search-dropdown">
+            <button
+              v-for="g in searchResults"
+              :key="g.name + g.region + g.district"
+              class="map-search-item"
+              @mousedown.prevent="selectGarden(g)"
+            >
+              <span class="map-search-name">{{ g.name }}</span>
+              <span class="map-search-meta">{{ g.district ? `${g.district}, ${g.region}` : g.region }} &middot; {{ g.count }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
     <div ref="mapRef" class="map-container" />
   </div>
@@ -192,8 +272,63 @@ watch(gardens, () => {
 .map-subtitle { font-size: 13px; color: var(--text-muted); }
 .map-container { flex: 1; min-height: 400px; }
 
+.map-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+
+.map-search { position: relative; flex-shrink: 0; }
+.map-search-input {
+  width: 220px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border, #ddd);
+  border-radius: 10px;
+  font-size: 13px;
+  background: var(--bg, #fff);
+  outline: none;
+  transition: border-color 0.2s;
+}
+.map-search-input:focus { border-color: #1a5632; }
+.map-search-input::placeholder { color: var(--text-muted, #999); }
+
+.map-search-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  width: 300px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  z-index: 1000;
+  padding: 4px;
+}
+.map-search-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.map-search-item:hover { background: var(--bg-hover, #f5f5f5); }
+.map-search-name { font-size: 13px; font-weight: 600; color: var(--text, #333); }
+.map-search-meta { font-size: 11px; color: var(--text-muted, #999); margin-top: 1px; }
+
 @media (min-width: 768px) {
   .map-header { padding: 20px 24px 14px; }
   .map-header h1 { font-size: 28px; }
+  .map-search-input { width: 260px; }
+}
+
+@media (max-width: 520px) {
+  .map-title-row { flex-direction: column; }
+  .map-search { width: 100%; }
+  .map-search-input { width: 100%; }
+  .map-search-dropdown { width: 100%; right: auto; left: 0; }
 }
 </style>

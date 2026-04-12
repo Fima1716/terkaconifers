@@ -1,6 +1,41 @@
 import { defineStore } from 'pinia'
 import Fuse from 'fuse.js'
 
+// Latin → Cyrillic transliteration for search
+const LAT2CYR_DI: [string, string][] = [
+  ['sch', 'ш'], ['sh', 'ш'], ['ch', 'ч'], ['ph', 'ф'], ['th', 'т'],
+  ['zh', 'ж'], ['ts', 'ц'], ['ck', 'к'], ['qu', 'кв'], ['wh', 'в'],
+  ['oo', 'у'], ['ee', 'и'],
+]
+const LAT2CYR: Record<string, string> = {
+  a: 'а', b: 'б', c: 'к', d: 'д', e: 'е', f: 'ф', g: 'г', h: 'х',
+  i: 'и', j: 'й', k: 'к', l: 'л', m: 'м', n: 'н', o: 'о', p: 'п',
+  q: 'к', r: 'р', s: 'с', t: 'т', u: 'у', v: 'в', w: 'в', x: 'кс',
+  y: 'и', z: 'з',
+}
+
+function translitLatinToCyrillic(s: string): string {
+  let r = s.toLowerCase()
+  for (const [lat, cyr] of LAT2CYR_DI) r = r.replaceAll(lat, cyr)
+  let out = ''
+  for (const ch of r) out += LAT2CYR[ch] ?? ch
+  return out
+}
+
+// Cyrillic → Latin for reverse search (user types Cyrillic, match Latin)
+const CYR2LAT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh',
+  з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o',
+  п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts',
+  ч: 'ch', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+}
+
+function translitCyrillicToLatin(s: string): string {
+  let out = ''
+  for (const ch of s.toLowerCase()) out += CYR2LAT[ch] ?? ch
+  return out
+}
+
 let fuseInstance: Fuse<Plant> | null = null
 
 export interface GrowingConditions {
@@ -81,7 +116,19 @@ export interface ActiveFilters {
 // Helper: apply all filters EXCEPT the one named `exclude`
 function applyFilters(plants: Plant[], f: ActiveFilters, exclude?: string): Plant[] {
   if (f.search && f.search.length >= 2 && fuseInstance && exclude !== 'search') {
-    plants = fuseInstance.search(f.search, { limit: 500 }).map(r => r.item)
+    // Search with original query + transliterated variant (Cyrillic↔Latin)
+    const hasCyrillic = /[а-яёА-ЯЁ]/.test(f.search)
+    const alt = hasCyrillic ? translitCyrillicToLatin(f.search) : translitLatinToCyrillic(f.search)
+    const results = fuseInstance.search(f.search, { limit: 500 })
+    if (alt && alt !== f.search.toLowerCase()) {
+      const altResults = fuseInstance.search(alt, { limit: 500 })
+      // Merge, deduplicate by id
+      const seen = new Set(results.map(r => r.item.id))
+      for (const r of altResults) {
+        if (!seen.has(r.item.id)) { results.push(r); seen.add(r.item.id) }
+      }
+    }
+    plants = results.map(r => r.item)
   }
   if (f.genus.length > 0 && exclude !== 'genus') {
     plants = plants.filter(p => f.genus.includes(p.genus))
@@ -274,8 +321,13 @@ export const useCatalogStore = defineStore('catalog', {
         const speciesConditions = conditionsData.species?.[p.species_full] ?? {}
         const overrideConditions = conditionsData.overrides?.[String(p.id)] ?? {}
         const merged = { ...speciesConditions, ...overrideConditions }
+        // Transliterate Latin cultivar/name to Cyrillic for search
+        const translit = p.cultivar
+          ? translitLatinToCyrillic(p.cultivar)
+          : translitLatinToCyrillic(p.latin_full)
         return {
           ...p,
+          _translit: translit,
           price: priceInfo?.price ?? null,
           old_price: priceInfo?.old_price ?? null,
           status: priceInfo?.status ?? pricesData.default_status ?? 'by_request',
@@ -289,13 +341,15 @@ export const useCatalogStore = defineStore('catalog', {
         keys: [
           { name: 'latin_full', weight: 1 },
           { name: 'cultivar', weight: 0.8 },
+          { name: '_translit', weight: 0.75 },
+          { name: 'cultivar_ru', weight: 0.7 },
           { name: 'name_ru', weight: 0.7 },
           { name: 'species_ru', weight: 0.6 },
           { name: 'genus_ru', weight: 0.5 },
           { name: 'garden_display', weight: 0.3 },
           { name: 'region_normalized', weight: 0.2 },
         ],
-        threshold: 0.3, distance: 120, minMatchCharLength: 2,
+        threshold: 0.35, distance: 150, minMatchCharLength: 2,
       })
       this.isLoaded = true
 

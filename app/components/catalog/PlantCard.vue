@@ -39,6 +39,12 @@ function toggleFav(e: Event) {
   favorites.toggle(props.plant.id)
 }
 
+function formatDate(d: string) {
+  const [day, month, year] = d.split('.')
+  const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+  return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`
+}
+
 const hasBuyLink = computed(() => !!props.buyLink)
 
 const router = useRouter()
@@ -110,6 +116,7 @@ function goToGarden(e: Event) {
         <span v-else class="card-garden">&nbsp;</span>
         <span class="card-region">{{ plant.region_normalized || '&nbsp;' }}</span>
         <span class="card-age">{{ plant.age_display || '&nbsp;' }}</span>
+        <span v-if="plant.is_new && plant.date" class="card-date">Добавлено {{ formatDate(plant.date) }}</span>
       </div>
       <a
         v-if="hasBuyLink"
@@ -323,6 +330,12 @@ function goToGarden(e: Event) {
 .card-age {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.card-date {
+  font-size: 10px;
+  color: #ff6d00;
+  font-weight: 600;
 }
 
 .btn-buy {

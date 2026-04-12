@@ -1,7 +1,19 @@
 <script setup lang="ts">
-const props = defineProps<{ plantId: number }>()
+const props = defineProps<{ plantId: number; gardenDisplay?: string }>()
 
 const publicUrl = usePublicUrl()
+
+// Check if current user can add diary entries
+const canAdd = ref(false)
+async function checkCanAdd() {
+  try {
+    const res = await $fetch<{ mode: string; garden: string | null }>('/api/garden-me')
+    if (res.mode === 'admin') { canAdd.value = true; return }
+    if (res.mode === 'owner' && res.garden && props.gardenDisplay && res.garden === props.gardenDisplay) {
+      canAdd.value = true
+    }
+  } catch {}
+}
 
 interface DiaryEntry {
   id: number
@@ -62,7 +74,6 @@ async function submit() {
     fd.append('plantId', String(props.plantId))
     fd.append('year', String(formYear.value))
     fd.append('photo', formPhoto.value)
-    fd.append('authorContact', formContact.value)
     fd.append('comment', formComment.value)
 
     await $fetch('/api/growth-diary', { method: 'POST', body: fd })
@@ -85,10 +96,10 @@ async function submit() {
 }
 
 function photoSrc(filename: string) {
-  return publicUrl(`uploads/growth/${filename}`)
+  return `/api/growth-photo/${filename}`
 }
 
-onMounted(fetchEntries)
+onMounted(() => { fetchEntries(); checkCanAdd() })
 </script>
 
 <template>
@@ -122,8 +133,8 @@ onMounted(fetchEntries)
       <div v-if="successMsg" class="gt-success">{{ successMsg }}</div>
     </Transition>
 
-    <!-- Toggle form button -->
-    <button class="gt-add-btn" @click="showForm = !showForm">
+    <!-- Toggle form button (only for owners/admins) -->
+    <button v-if="canAdd" class="gt-add-btn" @click="showForm = !showForm">
       {{ showForm ? 'Отмена' : 'Добавить фото' }}
     </button>
 
@@ -137,10 +148,6 @@ onMounted(fetchEntries)
         <label class="gt-field">
           <span class="gt-label">Год съёмки *</span>
           <input v-model.number="formYear" type="number" min="1990" :max="new Date().getFullYear()" />
-        </label>
-        <label class="gt-field">
-          <span class="gt-label">Контакт (необязательно)</span>
-          <input v-model="formContact" type="text" maxlength="100" placeholder="Telegram, email..." />
         </label>
         <label class="gt-field">
           <span class="gt-label">Комментарий (необязательно)</span>

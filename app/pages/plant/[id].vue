@@ -22,6 +22,46 @@ async function onPlantSaved() {
   await catalog.loadCatalog(true)
 }
 
+// Quick MAX post editor (superadmin only)
+const showMaxEditor = ref(false)
+const maxText = ref('')
+const maxLoading = ref(false)
+const maxSaving = ref(false)
+const maxResult = ref<{ ok: boolean; maxEdited: boolean; hasMid: boolean } | null>(null)
+
+async function openMaxEditor() {
+  maxLoading.value = true
+  maxResult.value = null
+  showMaxEditor.value = true
+  try {
+    const data = await $fetch<{ text: string }>(`/api/admin/max-text/${plantId.value}`)
+    maxText.value = data.text
+  } catch {
+    maxText.value = ''
+  }
+  maxLoading.value = false
+}
+
+async function saveMaxText() {
+  maxSaving.value = true
+  maxResult.value = null
+  try {
+    const data = await $fetch<{ ok: boolean; maxEdited: boolean; hasMid: boolean }>(`/api/admin/max-text/${plantId.value}`, {
+      method: 'PUT',
+      body: { text: maxText.value },
+    })
+    maxResult.value = data
+    if (data.ok) {
+      catalog.$patch({ isLoaded: false })
+      await catalog.loadCatalog(true)
+      setTimeout(() => { showMaxEditor.value = false }, 1500)
+    }
+  } catch (e: any) {
+    maxResult.value = { ok: false, maxEdited: false, hasMid: false }
+  }
+  maxSaving.value = false
+}
+
 const plantId = computed(() => parseInt(String(route.params.id)))
 const plant = computed(() => catalog.getPlantById(plantId.value))
 const relatedPlants = computed(() => plant.value ? catalog.getRelatedPlants(plant.value) : [])
@@ -292,6 +332,14 @@ async function sharePlant() {
           </svg>
           Редактировать
         </button>
+
+        <!-- Quick MAX post editor (superadmin only) -->
+        <button v-if="auth.isSuperAdmin" class="max-edit-btn" @click="openMaxEditor">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+          </svg>
+          Пост в MAX
+        </button>
         </div>
 
         <!-- Details table -->
@@ -370,7 +418,7 @@ async function sharePlant() {
     <!-- Growth diary -->
     <section class="growth-section">
       <h2 class="section-title">Дневник роста</h2>
-      <GrowthTimeline :plant-id="plantId" />
+      <GrowthTimeline :plant-id="plantId" :garden-display="plant?.garden_display" />
     </section>
 
     <!-- Same cultivar in different gardens -->
@@ -407,6 +455,33 @@ async function sharePlant() {
 
     <!-- Edit drawer -->
     <PlantEditDrawer v-if="showEditDrawer" :plant="plant" @close="showEditDrawer = false" @saved="onPlantSaved" />
+
+    <!-- Quick MAX post editor modal -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="showMaxEditor" class="max-overlay" @click.self="showMaxEditor = false">
+          <div class="max-modal">
+            <div class="max-header">
+              <h3>Текст поста в MAX</h3>
+              <button class="max-close" @click="showMaxEditor = false">&times;</button>
+            </div>
+            <div v-if="maxLoading" class="max-body" style="text-align:center;padding:40px;color:var(--text-muted)">Загрузка...</div>
+            <div v-else class="max-body">
+              <textarea v-model="maxText" class="max-textarea" rows="14" />
+              <div v-if="maxResult" class="max-result" :class="{ ok: maxResult.ok }">
+                <template v-if="maxResult.ok && maxResult.maxEdited">Пост обновлён в MAX и на сайте</template>
+                <template v-else-if="maxResult.ok && !maxResult.hasMid">Сохранено на сайте (нет mid для MAX)</template>
+                <template v-else-if="maxResult.ok">Сохранено на сайте, MAX не обновлён</template>
+                <template v-else>Ошибка при сохранении</template>
+              </div>
+              <button class="max-save" :disabled="maxSaving" @click="saveMaxText">
+                {{ maxSaving ? 'Сохранение...' : 'Сохранить' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 
   <div v-else class="container not-found">
@@ -750,6 +825,59 @@ async function sharePlant() {
   color: #fff; cursor: pointer; transition: background 0.15s;
 }
 .edit-btn-detail:hover { background: var(--primary-dark); }
+
+.max-edit-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 24px; min-height: 48px;
+  background: #1976d2; border: none;
+  border-radius: var(--radius-sm); font-size: 14px; font-weight: 600;
+  color: #fff; cursor: pointer; transition: background 0.15s;
+}
+.max-edit-btn:hover { background: #1565c0; }
+
+/* MAX editor modal */
+.max-overlay {
+  position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.max-modal {
+  background: var(--bg); border-radius: 16px;
+  width: 100%; max-width: 560px; max-height: 90dvh;
+  overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.max-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 8px;
+}
+.max-header h3 { font-size: 18px; font-weight: 700; }
+.max-close {
+  background: none; border: none; font-size: 28px; line-height: 1;
+  color: var(--text-muted); cursor: pointer;
+}
+.max-body { padding: 0 20px 20px; }
+.max-textarea {
+  width: 100%; padding: 12px; font-size: 14px; font-family: monospace;
+  border: 1.5px solid var(--border); border-radius: 8px;
+  background: var(--bg-alt); color: var(--text); resize: vertical;
+  line-height: 1.5;
+}
+.max-textarea:focus { border-color: var(--primary); outline: none; }
+.max-save {
+  margin-top: 12px; width: 100%; padding: 12px;
+  background: #1976d2; color: #fff; border: none;
+  border-radius: 10px; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s;
+}
+.max-save:hover:not(:disabled) { background: #1565c0; }
+.max-save:disabled { opacity: 0.5; cursor: not-allowed; }
+.max-result {
+  margin-top: 8px; padding: 8px 12px; border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  background: #ffebee; color: #c62828;
+}
+.max-result.ok { background: #e8f5e9; color: #2e7d32; }
 
 .share-toast {
   position: absolute;

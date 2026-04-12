@@ -10,7 +10,7 @@ module.exports = {
     },
     error_file: './logs/error.log',
     out_file: './logs/out.log',
-    merge_logs: true,
+    Что еmerge_logs: true,
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
   }],
 }

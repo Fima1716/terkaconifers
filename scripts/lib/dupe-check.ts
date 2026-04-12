@@ -236,10 +236,17 @@ export function extractGarden(text: string): string {
   return ''
 }
 
+// Generic garden names that don't identify a specific garden — treat as different gardens
+const GENERIC_GARDENS = new Set([
+  'частныйсад', 'частныесады', 'питомник',
+])
+
 function gardenMatch(g1: string, g2: string): boolean {
   if (!g1 || !g2) return false
   const n1 = g1.replace(/\s+/g, '').toLowerCase()
   const n2 = g2.replace(/\s+/g, '').toLowerCase()
+  // Generic garden names should never match — they are different gardens
+  if (GENERIC_GARDENS.has(n1) || GENERIC_GARDENS.has(n2)) return false
   return n1.includes(n2) || n2.includes(n1)
 }
 

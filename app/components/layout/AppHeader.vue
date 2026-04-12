@@ -48,29 +48,78 @@ function getFuse() {
     keys: [
       { name: 'latin_full', weight: 1 },
       { name: 'cultivar', weight: 0.8 },
+      { name: '_translit', weight: 0.75 },
+      { name: 'cultivar_ru', weight: 0.7 },
       { name: 'name_ru', weight: 0.7 },
       { name: 'species_ru', weight: 0.6 },
       { name: 'genus_ru', weight: 0.5 },
     ],
-    threshold: 0.3, distance: 120, minMatchCharLength: 2,
+    threshold: 0.35, distance: 150, minMatchCharLength: 2,
   })
   _fuseCatalogLen = catalog.catalog.length
   return _fuse
+}
+
+// Transliteration for cross-script search
+const CYR2LAT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh',
+  з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o',
+  п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts',
+  ч: 'ch', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+}
+const LAT2CYR_DI: [string, string][] = [
+  ['sch', 'ш'], ['sh', 'ш'], ['ch', 'ч'], ['ph', 'ф'], ['th', 'т'],
+  ['zh', 'ж'], ['ts', 'ц'], ['ck', 'к'], ['qu', 'кв'], ['oo', 'у'], ['ee', 'и'],
+]
+const LAT2CYR: Record<string, string> = {
+  a: 'а', b: 'б', c: 'к', d: 'д', e: 'е', f: 'ф', g: 'г', h: 'х',
+  i: 'и', j: 'й', k: 'к', l: 'л', m: 'м', n: 'н', o: 'о', p: 'п',
+  q: 'к', r: 'р', s: 'с', t: 'т', u: 'у', v: 'в', w: 'в', x: 'кс',
+  y: 'и', z: 'з',
+}
+function translit(s: string): string {
+  const hasCyr = /[а-яёА-ЯЁ]/.test(s)
+  if (hasCyr) {
+    let out = ''
+    for (const ch of s.toLowerCase()) out += CYR2LAT[ch] ?? ch
+    return out
+  }
+  let r = s.toLowerCase()
+  for (const [lat, cyr] of LAT2CYR_DI) r = r.replaceAll(lat, cyr)
+  let out = ''
+  for (const ch of r) out += LAT2CYR[ch] ?? ch
+  return out
+}
+
+function fuseSearchMerged(fuse: Fuse<any>, q: string, limit: number) {
+  const results = fuse.search(q, { limit })
+  const alt = translit(q)
+  if (alt && alt !== q.toLowerCase()) {
+    const altResults = fuse.search(alt, { limit })
+    const seen = new Set(results.map(r => r.item.id))
+    for (const r of altResults) {
+      if (!seen.has(r.item.id)) { results.push(r); seen.add(r.item.id) }
+    }
+  }
+  return results
 }
 
 const searchResults = computed(() => {
   const q = searchQuery.value.trim()
   if (q.length < 2 || !catalog.isLoaded) return { plants: [], genera: [], total: 0 }
 
-  const genera = (catalog.filters?.genera ?? []).filter(g =>
-    g.label.toLowerCase().includes(q.toLowerCase()) ||
-    g.value.toLowerCase().includes(q.toLowerCase())
-  ).slice(0, 3)
+  const ql = q.toLowerCase()
+  const qAlt = translit(q).toLowerCase()
+  const genera = (catalog.filters?.genera ?? []).filter(g => {
+    const l = g.label.toLowerCase()
+    const v = g.value.toLowerCase()
+    return l.includes(ql) || v.includes(ql) || l.includes(qAlt) || v.includes(qAlt)
+  }).slice(0, 3)
 
   const fuse = getFuse()
-  const plants = fuse.search(q, { limit: 6 }).map(r => r.item)
-  const totalResults = fuse.search(q, { limit: 500 }).length
-  return { plants, genera, total: totalResults }
+  const all = fuseSearchMerged(fuse, q, 500)
+  const plants = all.slice(0, 6).map(r => r.item)
+  return { plants, genera, total: all.length }
 })
 
 const showDropdown = computed(() => searchFocused.value && searchQuery.value.trim().length >= 2)
