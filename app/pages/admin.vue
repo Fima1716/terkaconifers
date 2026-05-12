@@ -551,6 +551,54 @@ async function loadBotEvents() {
   finally { botEventsLoading.value = false }
 }
 
+// Dialog viewer
+const dialogUser = ref<any>(null)
+const dialogMessages = ref<any[]>([])
+const dialogLoading = ref(false)
+const dialogUsers = ref<any[]>([])
+const showDialogList = ref(false)
+
+async function openDialog(userId: string, platform: string, userName?: string) {
+  dialogUser.value = { userId, platform, userName: userName || userId }
+  dialogLoading.value = true
+  dialogMessages.value = []
+  try {
+    const data = await $fetch<any>('/api/admin/rusinov-dialogs', { params: { userId, platform } })
+    dialogMessages.value = data.dialog || []
+  } catch {}
+  finally { dialogLoading.value = false }
+}
+
+function closeDialog() {
+  dialogUser.value = null
+  dialogMessages.value = []
+}
+
+async function openDialogList() {
+  showDialogList.value = true
+  try {
+    const data = await $fetch<any>('/api/admin/rusinov-dialogs')
+    dialogUsers.value = data.users || []
+  } catch {}
+}
+
+function exportEventsCSV() {
+  const rows = [['Время', 'Платформа', 'Пользователь', 'ID', 'Тип', 'Запрос', 'Ответ', 'Время ответа (мс)'].join('\t')]
+  for (const ev of botEvents.value) {
+    const time = new Date(ev.ts).toLocaleString('ru-RU')
+    const q = (ev.query || '').replace(/[\t\n\r]/g, ' ')
+    const r = (ev.response || '').replace(/[\t\n\r]/g, ' ')
+    rows.push([time, ev.platform, ev.userName || '', ev.userId || '', ev.type, q, r, ev.latencyMs || ''].join('\t'))
+  }
+  const blob = new Blob([rows.join('\n')], { type: 'text/tab-separated-values;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `bot-events-${new Date().toISOString().slice(0, 10)}.tsv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function formatBotTime(ts: number) {
   if (!ts) return '—'
   const d = new Date(ts)
@@ -1423,6 +1471,8 @@ function removeCatalogLink(idx: number) {
                   <option value="start">Старт</option>
                 </select>
                 <button class="btn-secondary" style="padding:6px 14px;font-size:12px" @click="loadBotEvents()">Обновить</button>
+                <button class="btn-secondary" style="padding:6px 14px;font-size:12px" @click="openDialogList()">Диалоги</button>
+                <button class="btn-secondary" style="padding:6px 14px;font-size:12px" @click="exportEventsCSV()" :disabled="!botEvents.length">Экспорт TSV</button>
               </div>
             </div>
 
@@ -1444,7 +1494,7 @@ function removeCatalogLink(idx: number) {
                   <tr v-for="(ev, i) in botEvents" :key="i" :class="{ 'bot-event-error': ev.type === 'error', 'bot-event-start': ev.type === 'start' }">
                     <td class="bot-ev-time">{{ formatBotDate(ev.ts) }}</td>
                     <td><span class="bot-ev-platform" :class="'bot-ev-' + ev.platform">{{ platformLabels[ev.platform] || ev.platform }}</span></td>
-                    <td class="bot-ev-user">{{ ev.userName || ev.userId || '—' }}</td>
+                    <td class="bot-ev-user"><a v-if="ev.userId" href="#" style="color:#1a5632;text-decoration:underline;cursor:pointer" @click.prevent="openDialog(ev.userId, ev.platform, ev.userName)">{{ ev.userName || ev.userId }}</a><span v-else>—</span></td>
                     <td class="bot-ev-text">
                       <template v-if="ev.type === 'error'"><span style="color:#c62828">{{ ev.error || 'Ошибка' }}</span></template>
                       <template v-else-if="ev.type === 'start'"><em style="color:#888">Запустил бота</em></template>
@@ -1481,6 +1531,71 @@ function removeCatalogLink(idx: number) {
                 <pre v-if="catalogResult.logs" class="sync-logs">{{ catalogResult.logs }}</pre>
               </div>
             </div>
+
+          <!-- Dialog modal -->
+          <Teleport to="body">
+            <div v-if="dialogUser" class="modal-overlay" @click.self="closeDialog()">
+              <div class="modal-dialog" style="max-width:700px;max-height:85vh;display:flex;flex-direction:column">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border,#eee)">
+                  <div>
+                    <h3 style="margin:0;font-size:16px">{{ dialogUser.userName }}</h3>
+                    <span style="font-size:12px;color:#888">{{ platformLabels[dialogUser.platform] || dialogUser.platform }} / ID: {{ dialogUser.userId }}</span>
+                  </div>
+                  <button style="background:none;border:none;font-size:20px;cursor:pointer;color:#888" @click="closeDialog()">&times;</button>
+                </div>
+                <div v-if="dialogLoading" style="padding:40px;text-align:center;color:#888">Загрузка...</div>
+                <div v-else style="flex:1;overflow-y:auto;padding:16px 20px">
+                  <div v-for="(msg, i) in dialogMessages" :key="i" style="margin-bottom:12px">
+                    <template v-if="msg.type === 'message'">
+                      <div style="margin-bottom:4px">
+                        <span style="font-size:11px;color:#999">{{ formatBotDate(msg.ts) }}</span>
+                        <span v-if="msg.latencyMs" style="font-size:10px;color:#bbb;margin-left:8px">{{ (msg.latencyMs/1000).toFixed(1) }}с</span>
+                      </div>
+                      <div style="background:var(--bg-hover,#f0f7f0);padding:8px 12px;border-radius:10px 10px 10px 2px;margin-bottom:4px;font-size:13px;max-width:90%">
+                        {{ msg.query }}
+                      </div>
+                      <div v-if="msg.response" style="background:var(--bg,#f5f5f5);padding:8px 12px;border-radius:10px 10px 2px 10px;margin-left:auto;font-size:13px;max-width:90%;white-space:pre-wrap;color:#333">{{ msg.response }}</div>
+                    </template>
+                    <template v-else-if="msg.type === 'start'">
+                      <div style="text-align:center;font-size:11px;color:#bbb;margin:8px 0">{{ formatBotDate(msg.ts) }} — запустил бота</div>
+                    </template>
+                    <template v-else-if="msg.type === 'error'">
+                      <div style="text-align:center;font-size:11px;color:#c62828;margin:8px 0">{{ formatBotDate(msg.ts) }} — {{ msg.error || 'ошибка' }}</div>
+                    </template>
+                  </div>
+                  <div v-if="!dialogMessages.length && !dialogLoading" style="text-align:center;color:#aaa;padding:20px">Нет сообщений</div>
+                </div>
+              </div>
+            </div>
+          </Teleport>
+
+          <!-- Dialog list modal -->
+          <Teleport to="body">
+            <div v-if="showDialogList" class="modal-overlay" @click.self="showDialogList = false">
+              <div class="modal-dialog" style="max-width:600px;max-height:80vh;display:flex;flex-direction:column">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border,#eee)">
+                  <h3 style="margin:0;font-size:16px">Диалоги пользователей</h3>
+                  <button style="background:none;border:none;font-size:20px;cursor:pointer;color:#888" @click="showDialogList = false">&times;</button>
+                </div>
+                <div style="flex:1;overflow-y:auto;padding:8px 0">
+                  <div v-for="u in dialogUsers" :key="u.platform + '_' + u.userId"
+                    style="display:flex;justify-content:space-between;align-items:center;padding:10px 20px;border-bottom:1px solid var(--border,#f0f0f0);cursor:pointer;transition:background 0.15s"
+                    class="dialog-user-row"
+                    @click="showDialogList = false; openDialog(u.userId, u.platform, u.userName)">
+                    <div>
+                      <div style="font-size:14px;font-weight:600">{{ u.userName || u.userId }}</div>
+                      <div style="font-size:11px;color:#999">{{ u.lastQuery?.slice(0, 60) || '...' }}</div>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0">
+                      <span class="bot-ev-platform" :class="'bot-ev-' + u.platform" style="font-size:10px">{{ platformLabels[u.platform] || u.platform }}</span>
+                      <div style="font-size:11px;color:#888;margin-top:2px">{{ u.messageCount }} сообщ.</div>
+                    </div>
+                  </div>
+                  <div v-if="!dialogUsers.length" style="text-align:center;color:#aaa;padding:30px;font-size:13px">Загрузка...</div>
+                </div>
+              </div>
+            </div>
+          </Teleport>
 
           <!-- Prompt constructor header -->
           <div class="page-head" style="margin-top:8px">
@@ -1752,6 +1867,8 @@ function removeCatalogLink(idx: number) {
 /* ── Modal ────────────────────── */
 .modal-overlay { position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .modal { background: #fff; border-radius: 16px; width: 100%; max-width: 600px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,0.2); }
+.modal-dialog { background: #fff; border-radius: 16px; width: 100%; box-shadow: 0 16px 48px rgba(0,0,0,0.2); }
+.dialog-user-row:hover { background: var(--bg-hover, #f5f5f5); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #eee; }
 .modal-head h3 { font-size: 16px; }
 .modal-close { background: none; border: none; font-size: 18px; color: #999; cursor: pointer; }

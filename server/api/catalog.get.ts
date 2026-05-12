@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'fs'
 import { resolve } from 'path'
 
 // Fields to strip from catalog response (unused on frontend, save ~1.5MB)
-const STRIP_FIELDS = ['hashtags', 'max_url', 'region', 'age', 'garden', 'is_russian', 'garden_type', 'name_ru', 'hardiness_zone', 'hardiness_label']
+const STRIP_FIELDS = ['hashtags', 'max_url', 'age', 'garden', 'is_russian', 'garden_type', 'name_ru', 'hardiness_zone', 'hardiness_label']
 
 let cache: any[] | null = null
 let cacheMtime = 0

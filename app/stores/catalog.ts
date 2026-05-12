@@ -63,6 +63,7 @@ export interface Plant {
   form_ru: string | null
   color: string | null
   color_ru: string | null
+  region: string
   region_normalized: string
   region_district: string
   garden_display: string

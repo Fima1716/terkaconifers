@@ -11,49 +11,38 @@ useHead({
 
 // Geocoded coordinates (fetched from cache)
 const geocodes = ref<Record<string, [number, number]>>({})
+const gardenCoords = ref<Record<string, [number, number]>>({})
 const geocodesLoaded = ref(false)
 
 onMounted(async () => {
   try {
-    const data = await $fetch<Record<string, [number, number]>>('/api/geocodes')
-    geocodes.value = data || {}
+    const [geo, gardensData] = await Promise.all([
+      $fetch<Record<string, [number, number]>>('/api/geocodes'),
+      $fetch<{ gardens: Record<string, any> }>('/api/gardens'),
+    ])
+    geocodes.value = geo || {}
+    // Extract per-garden coordinates
+    const gc: Record<string, [number, number]> = {}
+    for (const [name, profile] of Object.entries(gardensData?.gardens || {})) {
+      if (profile.coords && Array.isArray(profile.coords) && profile.coords.length === 2) {
+        gc[name] = profile.coords
+      }
+    }
+    gardenCoords.value = gc
   } catch {}
   geocodesLoaded.value = true
 })
 
-// Normalize district spelling to match geocodes cache keys
-const DISTRICT_NORM: Record<string, string> = {
-  'Сергиево Посадский район': 'Сергиево-Посадский район',
-  'Сергиево-Посадский р-н': 'Сергиево-Посадский район',
-  'Сергиево- Посадский район': 'Сергиево-Посадский район',
-  'Сергиево_Посадский район': 'Сергиево-Посадский район',
-  'Сергиево - Посадский район': 'Сергиево-Посадский район',
-  'Лотошинский р-н': 'Лотошинский район',
-  'г. Миасс': 'г.Миасс',
-  'г. Пятигорск': 'г.Пятигорск',
-  'г. Иркутск': 'г.Иркутск',
-  'г. Ростов-на-Дону': 'г.Ростов-на-Дону',
-  'Ростов-на-Дону': 'г.Ростов-на-Дону',
-  'г. Черноголовка': 'Черноголовка',
-  'г. Химки': 'Химкинский район',
-  'Чеховский  район': 'Чеховский район',
-  'Чеховский раон': 'Чеховский район',
-  'г. Чайковский': 'Чайковский',
-  'г. Щёлково': 'Щёлковский район',
-  'г. Покров': 'г.Покров',
-  'г. Дорогобуж': 'г.Дорогобуж',
-}
-
-function resolveCoords(region: string, district: string): [number, number] | null {
+// Resolve coordinates from raw region string (direct geocode match)
+function resolveCoords(rawRegion: string): [number, number] | null {
   const geo = geocodes.value
-  const nd = DISTRICT_NORM[district] || district
-  // Try region+district first (most precise)
-  if (nd) {
-    const key = `${region}|${nd}`
-    if (geo[key]) return geo[key]
-  }
-  // Fallback to region only
-  return geo[region] || null
+  if (!rawRegion) return null
+  // Direct match on raw region text (most precise)
+  if (geo[rawRegion]) return geo[rawRegion]
+  // Fallback: try trimmed version
+  const trimmed = rawRegion.trim().replace(/,?\s*$/, '')
+  if (geo[trimmed]) return geo[trimmed]
+  return null
 }
 
 // Build garden data from catalog
@@ -64,39 +53,108 @@ interface GardenPin {
   count: number
   coords: [number, number]
   genera: string[]
+  hasExactCoords: boolean
+}
+
+// Deterministic hash for jitter
+function hashStr(s: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return h >>> 0
 }
 
 const gardens = computed<GardenPin[]>(() => {
   if (!catalog.isLoaded || !geocodesLoaded.value) return []
-  const map = new Map<string, { region: string; district: string; count: number; genera: Set<string>; displayName: string }>()
+  const map = new Map<string, { rawRegion: string; region: string; district: string; count: number; genera: Set<string>; displayName: string }>()
   for (const p of catalog.catalog) {
     const g = p.garden_display
     if (!g) continue
+    const rawRegion = p.region || ''
     const region = p.region_normalized || ''
     const district = p.region_district || ''
-    // "Частные сады" — split by region+district, each becomes separate pin
+    // "Частные сады" — split by raw region, each becomes separate pin
     const isPrivate = g === 'Частные сады' || g === 'Частный сад'
-    const key = isPrivate ? `Частный сад|${region}|${district}` : g
-    if (!map.has(key)) map.set(key, { region, district, count: 0, genera: new Set(), displayName: isPrivate ? 'Частный сад' : g })
+    const key = isPrivate ? `Частный сад|${rawRegion}` : g
+    if (!map.has(key)) map.set(key, { rawRegion, region, district, count: 0, genera: new Set(), displayName: isPrivate ? 'Частный сад' : g })
     const entry = map.get(key)!
     entry.count++
     if (p.genus_ru) entry.genera.add(p.genus_ru)
   }
-  const pins: GardenPin[] = []
+
+  // Group pins by base coordinate to apply circular spread
+  const byCoord = new Map<string, string[]>()  // "lat,lon" → [key1, key2, ...]
+  const pinData = new Map<string, { data: typeof map extends Map<string, infer V> ? V : never; baseCoords: [number, number]; hasExact: boolean }>()
+
   for (const [key, data] of map) {
-    const coords = resolveCoords(data.region, data.district)
+    // Check for per-garden exact coordinates first
+    const exactCoords = gardenCoords.value[data.displayName]
+    if (exactCoords) {
+      pinData.set(key, { data, baseCoords: exactCoords, hasExact: true })
+      continue
+    }
+    // Resolve by raw region text (geocoded directly from channel posts)
+    const coords = resolveCoords(data.rawRegion)
     if (!coords) continue
-    const jitter = (s: string) => { let h = 0; for (const c of s) h = ((h << 5) - h + c.charCodeAt(0)) | 0; return (h % 100) / 500 }
+    pinData.set(key, { data, baseCoords: coords, hasExact: false })
+    const coordKey = `${coords[0].toFixed(4)},${coords[1].toFixed(4)}`
+    if (!byCoord.has(coordKey)) byCoord.set(coordKey, [])
+    byCoord.get(coordKey)!.push(key)
+  }
+
+  const pins: GardenPin[] = []
+  for (const [key, info] of pinData) {
+    let finalCoords: [number, number]
+
+    if (info.hasExact) {
+      finalCoords = info.baseCoords
+    } else {
+      const coordKey = `${info.baseCoords[0].toFixed(4)},${info.baseCoords[1].toFixed(4)}`
+      const group = byCoord.get(coordKey) || [key]
+      const idx = group.indexOf(key)
+      const total = group.length
+
+      if (total <= 1) {
+        // Single garden at this location — slight hash-based offset
+        const h = hashStr(key)
+        finalCoords = [
+          info.baseCoords[0] + ((h % 100) - 50) / 1000,
+          info.baseCoords[1] + (((h >> 8) % 100) - 50) / 1000,
+        ]
+      } else {
+        // Multiple gardens — spread in a circle (radius ~0.08° ≈ 8km)
+        const angle = (2 * Math.PI * idx) / total + hashStr(key) * 0.01
+        const radius = 0.06 + (total > 5 ? 0.03 : 0)
+        finalCoords = [
+          info.baseCoords[0] + Math.cos(angle) * radius,
+          info.baseCoords[1] + Math.sin(angle) * radius * 1.5, // lon correction for latitude
+        ]
+      }
+    }
+
     pins.push({
-      name: data.displayName || key,
-      region: data.region,
-      district: data.district,
-      count: data.count,
-      coords: [coords[0] + jitter(key), coords[1] + jitter(key + 'x')],
-      genera: [...data.genera].slice(0, 5),
+      name: info.data.displayName || key,
+      region: info.data.region,
+      district: info.data.district,
+      count: info.data.count,
+      coords: finalCoords,
+      genera: [...info.data.genera].slice(0, 5),
+      hasExactCoords: info.hasExact,
     })
   }
   return pins
+})
+
+// Unique named gardens count (excluding private garden splits)
+const gardenCount = computed(() => {
+  if (!catalog.isLoaded) return 0
+  const names = new Set<string>()
+  for (const p of catalog.catalog) {
+    if (p.garden_display) names.add(p.garden_display)
+  }
+  return names.size
 })
 
 // Search
@@ -134,6 +192,13 @@ onMounted(() => {
     }
   })
 })
+
+// Tree SVG icon for markers
+function treeSvg(size: number, fill: string): string {
+  return `<svg viewBox="0 0 20 28" width="${size}" height="${Math.round(size * 1.4)}" xmlns="http://www.w3.org/2000/svg">
+    <path d="M10 1 L5.5 9 L7.5 9 L3.5 16 L6.5 16 L1.5 24 L8.5 24 L8.5 27 L11.5 27 L11.5 24 L18.5 24 L13.5 16 L16.5 16 L12.5 9 L14.5 9 Z" fill="${fill}" stroke="#fff" stroke-width="0.8" stroke-linejoin="round"/>
+  </svg>`
+}
 
 // Init map
 const mapRef = ref<HTMLElement>()
@@ -174,11 +239,19 @@ function addMarkers() {
   markerMap.forEach(m => m.remove())
   markerMap.clear()
 
-  const icon = L.divIcon({ className: 'garden-marker', iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -10] })
-  const bigIcon = L.divIcon({ className: 'garden-marker garden-marker-big', iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -12] })
-
   for (const g of gardens.value) {
-    const marker = L.marker(g.coords, { icon: g.count > 50 ? bigIcon : icon }).addTo(leafletMap)
+    const isBig = g.count > 50
+    const size = isBig ? 20 : 14
+    const fill = isBig ? '#2e7d32' : '#1a5632'
+    const icon = L.divIcon({
+      className: 'tree-marker',
+      html: treeSvg(size, fill),
+      iconSize: [size, Math.round(size * 1.4)],
+      iconAnchor: [size / 2, Math.round(size * 1.4)],
+      popupAnchor: [0, -Math.round(size * 1.4) + 4],
+    })
+
+    const marker = L.marker(g.coords, { icon }).addTo(leafletMap)
     const location = g.district ? `${g.district}, ${g.region}` : g.region
     marker.bindPopup(`
       <div style="min-width:180px">
@@ -217,7 +290,7 @@ watch(gardens, () => {
       <div class="map-title-row">
         <div>
           <h1>Карта садов</h1>
-          <p class="map-subtitle">{{ gardens.length }} садов по всей России</p>
+          <p class="map-subtitle">{{ gardenCount }} садов по всей России</p>
         </div>
         <div ref="searchRef" class="map-search">
           <input
@@ -246,17 +319,20 @@ watch(gardens, () => {
 </template>
 
 <style>
-/* Global styles for Leaflet markers */
-.garden-marker {
-  background: #1a5632;
-  border: 2.5px solid #fff;
-  border-radius: 50%;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+/* Global styles for Leaflet tree markers */
+.tree-marker {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+  transition: transform 0.15s ease;
 }
-.garden-marker-big {
-  background: #2e7d32;
-  border-width: 3px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+.tree-marker:hover {
+  transform: scale(1.3);
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
 }
 .leaflet-popup-content-wrapper {
   border-radius: 12px !important;

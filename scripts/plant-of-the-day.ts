@@ -24,8 +24,22 @@ if (existsSync(envPath)) {
 }
 
 const MAX_TOKEN = envVars.MAX_BOT_TOKEN || ''
-const CHAT_ID = envVars.ADMIN_CHAT_ID || '-72548188058297'
 const FORCE = process.argv.includes('--force')
+
+// Max каналы
+const POTD_CHANNELS = [
+  '-72007651062457',  // Чат Хвоя Русинов Сад
+  '-68936251771577',  // Канал Русинов Сад
+]
+
+// TG
+const TG_TOKEN = envVars.POTD_TG_TOKEN || ''
+const TG_CHANNEL = envVars.POTD_TG_CHANNEL || ''
+
+// VK
+const VK_TOKEN = envVars.POTD_VK_TOKEN || ''
+const VK_USER_TOKEN = envVars.POTD_VK_USER_TOKEN || ''
+const VK_GROUP_ID = envVars.POTD_VK_GROUP_ID || ''
 
 if (!MAX_TOKEN) { console.error('No MAX_BOT_TOKEN in .env'); process.exit(1) }
 
@@ -64,15 +78,7 @@ function pickPlant(catalog: any[], posted: string[]): any | null {
   )
   if (!candidates.length) return null
 
-  const scored = candidates.map(p => ({
-    plant: p,
-    score: (p.photos?.length > 1 ? 2 : 0) +
-           (p.is_russian ? 1 : 0) +
-           (p.age ? 1 : 0) +
-           Math.random() * 3,
-  }))
-  scored.sort((a, b) => b.score - a.score)
-  return scored[0].plant
+  return candidates[Math.floor(Math.random() * candidates.length)]
 }
 
 // ── Format like MAX channel post ─────────────────────────
@@ -123,12 +129,112 @@ async function postToMax(text: string, photos: string[]) {
   })
   const body: any = { text }
   if (attachments.length) body.attachments = attachments
-  const resp = await fetch(`https://platform-api.max.ru/messages?chat_id=${CHAT_ID}`, {
-    method: 'POST',
-    headers: { Authorization: MAX_TOKEN, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  return resp.json()
+
+  const results = []
+  for (const chatId of POTD_CHANNELS) {
+    const resp = await fetch(`https://platform-api.max.ru/messages?chat_id=${chatId}`, {
+      method: 'POST',
+      headers: { Authorization: MAX_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await resp.json()
+    console.log(`  → ${chatId}: ${resp.ok ? 'OK' : JSON.stringify(json)}`)
+    results.push(json)
+  }
+  return results
+}
+
+// ── Post to TG ──────────────────────────────────────────
+// Upload photos as files (TG can't always fetch URLs from Russian servers)
+async function postToTelegram(text: string, photoUrls: string[]) {
+  if (!TG_TOKEN || !TG_CHANNEL) { console.log('  TG: not configured, skipping'); return }
+  try {
+    const base = `https://api.telegram.org/bot${TG_TOKEN}`
+    if (photoUrls.length === 0) {
+      const r = await fetch(`${base}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: TG_CHANNEL, text }) })
+      const d = await r.json()
+      console.log(`  TG: ${d.ok ? 'OK' : JSON.stringify(d)}`)
+    } else if (photoUrls.length === 1) {
+      const buf = Buffer.from(await (await fetch(photoUrls[0])).arrayBuffer())
+      const boundary = '----TG' + Date.now()
+      const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${TG_CHANNEL}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${text.slice(0, 1024)}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="photo.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`),
+        buf,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ])
+      const r = await fetch(`${base}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` }, body })
+      const d = await r.json()
+      console.log(`  TG: ${d.ok ? 'OK' : JSON.stringify(d)}`)
+    } else {
+      // Multiple photos: upload all as multipart in single sendMediaGroup
+      const boundary = '----TG' + Date.now()
+      const parts: Buffer[] = []
+      const media = photoUrls.slice(0, 10).map((_, i) => ({
+        type: 'photo',
+        media: `attach://photo${i}`,
+        ...(i === 0 ? { caption: text.slice(0, 1024) } : {}),
+      }))
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${TG_CHANNEL}\r\n`))
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="media"\r\n\r\n${JSON.stringify(media)}\r\n`))
+      for (let i = 0; i < photoUrls.slice(0, 10).length; i++) {
+        const buf = Buffer.from(await (await fetch(photoUrls[i])).arrayBuffer())
+        parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo${i}"; filename="photo${i}.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`))
+        parts.push(buf)
+        parts.push(Buffer.from('\r\n'))
+      }
+      parts.push(Buffer.from(`--${boundary}--\r\n`))
+      const body = Buffer.concat(parts)
+      const r = await fetch(`${base}/sendMediaGroup`, { method: 'POST', headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` }, body })
+      const d = await r.json()
+      console.log(`  TG: ${d.ok ? 'OK' : JSON.stringify(d)}`)
+    }
+  } catch (err) { console.error('  TG error:', err) }
+}
+
+// ── Post to VK ──────────────────────────────────────────
+async function postToVK(text: string, photoUrls: string[]) {
+  if (!VK_TOKEN || !VK_GROUP_ID) { console.log('  VK: not configured, skipping'); return }
+  try {
+    let attachments = ''
+    const photoToken = VK_USER_TOKEN || VK_TOKEN
+
+    if (photoUrls.length > 0) {
+      const srvRes = await fetch(`https://api.vk.com/method/photos.getWallUploadServer?group_id=${VK_GROUP_ID}&access_token=${photoToken}&v=5.199`)
+      const uploadUrl = (await srvRes.json())?.response?.upload_url
+      if (!uploadUrl) { console.error('  VK: no upload URL'); }
+
+      if (uploadUrl) {
+        const uploaded: string[] = []
+        for (const url of photoUrls.slice(0, 10)) {
+          try {
+            const blob = await (await fetch(url)).arrayBuffer()
+            const buf = Buffer.from(blob)
+            const boundary = '----VK' + Date.now()
+            const body = Buffer.concat([
+              Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="photo.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`),
+              buf,
+              Buffer.from(`\r\n--${boundary}--\r\n`),
+            ])
+            const upRes = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` }, body })
+            const upData = await upRes.json()
+            if (!upData.photo || upData.photo === '[]') continue
+            const saveRes = await fetch(`https://api.vk.com/method/photos.saveWallPhoto?group_id=${VK_GROUP_ID}&photo=${encodeURIComponent(upData.photo)}&server=${upData.server}&hash=${upData.hash}&access_token=${photoToken}&v=5.199`)
+            const saved = (await saveRes.json())?.response?.[0]
+            if (saved) uploaded.push(`photo${saved.owner_id}_${saved.id}`)
+          } catch (e) { console.error('  VK photo error:', e) }
+        }
+        attachments = uploaded.join(',')
+      }
+    }
+
+    const params = new URLSearchParams({ owner_id: `-${VK_GROUP_ID}`, from_group: '1', message: text, access_token: VK_TOKEN, v: '5.199' })
+    if (attachments) params.set('attachments', attachments)
+    const data = await (await fetch(`https://api.vk.com/method/wall.post?${params}`)).json()
+    console.log(`  VK: ${data?.response?.post_id ? 'OK (post ' + data.response.post_id + ')' : JSON.stringify(data?.error || data)}`)
+  } catch (err) { console.error('  VK error:', err) }
 }
 
 // ── Main ─────────────────────────────────────────────────
@@ -157,7 +263,11 @@ async function main() {
   console.log('---')
   console.log(`Photos: ${plant.photos.length}`)
 
+  const fullPhotoUrls = plant.photos.map((ph: string) => ph.startsWith('http') ? ph : `https://terkaconifers.ru/${ph}`)
+
   await postToMax(text, plant.photos)
+  await postToTelegram(text, fullPhotoUrls)
+  await postToVK(text, fullPhotoUrls)
 
   state.posted.push(plant.latin_full)
   state.lastDate = today

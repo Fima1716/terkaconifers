@@ -12,6 +12,7 @@
  * Запуск: npx tsx scripts/bot.ts
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { createServer } from 'http'
 import { resolve } from 'path'
 import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden, loadPublications, removePublication } from './lib/dupe-check.js'
 
@@ -32,6 +33,9 @@ const TOKEN = env.MAX_BOT_TOKEN || ''
 const ADMIN_CHAT_ID = env.ADMIN_CHAT_ID || '-72548188058297'
 const BASE_URL = 'https://platform-api.max.ru'
 const AI_KEY = env.DEEPSEEK_API_KEY || env.GROQ_API_KEY || ''
+const WEBHOOK_PORT = parseInt(env.WEBHOOK_PORT || '3001')
+const WEBHOOK_SECRET = env.WEBHOOK_SECRET || ''
+const WEBHOOK_URL = env.WEBHOOK_URL || '' // e.g. https://terkaconifers.ru/webhook/leshy
 
 const PROTECTED_CATALOG_ID = '-71324192443065'
 
@@ -436,6 +440,10 @@ async function process(update: any) {
   const name = msg.sender?.name || msg.sender?.first_name || '?'
   const username = msg.sender?.username || ''
   const chatId = msg.recipient?.chat_id
+
+  // Ignore channels where bot only posts (plant-of-the-day etc.)
+  const IGNORE_CHATS = ['-72007651062457', '-68936251771577'] // Русинов Сад: чат + канал
+  if (IGNORE_CHATS.includes(String(chatId))) return
   const text = msg.body?.text || ''
 
   // ════════════════════════════════════════════
@@ -745,6 +753,24 @@ async function process(update: any) {
         } else if (!existing) {
           state.gardenOwners[uidStr] = { garden: gardenDisplay, count: 1 }
         }
+
+        // Auto-consent: user submitted a plant via bot → they agree to publish
+        try {
+          const gardensPath = resolve(ROOT, 'data/gardens.json')
+          const gardensData = existsSync(gardensPath) ? JSON.parse(readFileSync(gardensPath, 'utf-8')) : { gardens: {} }
+          if (!gardensData.gardens) gardensData.gardens = {}
+          if (!gardensData.gardens[gardenDisplay]?.consent) {
+            gardensData.gardens[gardenDisplay] = {
+              ...(gardensData.gardens[gardenDisplay] || {}),
+              consent: true,
+              consentAt: new Date().toISOString(),
+              consentSource: 'bot-submission',
+            }
+            writeFileSync(gardensPath, JSON.stringify(gardensData, null, 2))
+            log(`Auto-consent granted for garden "${gardenDisplay}"`)
+          }
+        } catch (e) { log(`Auto-consent error: ${e}`) }
+
         // Suggest garden management at 30+ plants
         if (state.gardenOwners[uidStr]?.count === 30) {
           await send(target.chatId,
@@ -878,37 +904,51 @@ function log(msg: string) {
   console.log(`[${new Date().toISOString()}] ${msg}`)
 }
 
-// ── Long polling ───────────────────────────────────────────
-async function poll() {
-  let marker: number | null = null
-  log(`🌲 Bot "Леший" started → ADMIN_CHAT_ID=${ADMIN_CHAT_ID}`)
-
-  while (true) {
-    try {
-      const params = new URLSearchParams({
-        timeout: '25', limit: '100',
-        types: 'message_created,message_callback,bot_started',
-      })
-      if (marker) params.set('marker', String(marker))
-
-      const resp = await fetch(`${BASE_URL}/updates?${params}`, { headers: { Authorization: TOKEN } })
-      if (!resp.ok) { log(`Poll error: ${resp.status}`); await sleep(5000); continue }
-
-      const data: any = await resp.json()
-      if (data.marker) marker = data.marker
-
-      for (const upd of (data.updates || [])) {
-        try {
-          await process(upd)
-        } catch (e) { console.error('Update error:', e) }
-      }
-    } catch (e) {
-      log(`Poll error: ${e}`)
-      await sleep(5000)
-    }
+// ── Webhook server ─────────────────────────────────────────
+async function registerWebhook() {
+  if (!WEBHOOK_URL) {
+    log('⚠️  No WEBHOOK_URL in .env — register webhook manually via POST /subscriptions')
+    return
+  }
+  const body: any = {
+    url: WEBHOOK_URL,
+    update_types: ['message_created', 'message_callback', 'bot_started'],
+  }
+  if (WEBHOOK_SECRET) body.secret = WEBHOOK_SECRET
+  try {
+    const resp = await fetch(`${BASE_URL}/subscriptions`, {
+      method: 'POST', headers: H, body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    log(`Webhook registered: ${JSON.stringify(data)}`)
+  } catch (e) {
+    log(`Webhook registration failed: ${e}`)
   }
 }
 
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+function startServer() {
+  const server = createServer((req, res) => {
+    if (req.method !== 'POST') { res.writeHead(200); res.end('ok'); return }
+    if (WEBHOOK_SECRET && req.headers['x-max-bot-api-secret'] !== WEBHOOK_SECRET) {
+      log('Webhook: invalid secret'); res.writeHead(403); res.end(); return
+    }
 
-poll()
+    let body = ''
+    req.on('data', (chunk: Buffer) => { body += chunk })
+    req.on('end', () => {
+      // Return 200 immediately, process async
+      res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('ok')
+      try {
+        const update = JSON.parse(body)
+        process(update).catch(e => console.error('Webhook process error:', e))
+      } catch (e) { console.error('Webhook JSON parse error:', e) }
+    })
+  })
+
+  server.listen(WEBHOOK_PORT, () => {
+    log(`🌲 Bot "Леший" webhook server on port ${WEBHOOK_PORT}`)
+  })
+}
+
+log(`🌲 Bot "Леший" started → ADMIN_CHAT_ID=${ADMIN_CHAT_ID}`)
+registerWebhook().then(startServer)

@@ -351,6 +351,8 @@ async function main() {
       if (!existingByUrl.originator && plant.originator) { existingByUrl.originator = plant.originator; changed = true }
       if (existingByUrl.name_ru !== plant.name_ru && plant.name_ru) { existingByUrl.name_ru = plant.name_ru; changed = true }
       if (existingByUrl.latin_full !== plant.latin_full) { existingByUrl.latin_full = plant.latin_full; changed = true }
+      if (plant.is_russian !== existingByUrl.is_russian) { existingByUrl.is_russian = plant.is_russian; changed = true }
+      if (JSON.stringify(plant.hashtags) !== JSON.stringify(existingByUrl.hashtags)) { existingByUrl.hashtags = plant.hashtags; changed = true }
       // Only update photos if:
       // 1. No local photos (avoid replacing local paths with MAX URLs)
       // 2. This message is not older than what's already stored (don't overwrite newer photos)
@@ -511,6 +513,30 @@ async function main() {
     // Save catalog
     writeFileSync(catalogPath, JSON.stringify(catalog))
     log('  Saved catalog.json')
+
+    // Auto-consent: all gardens in the catalog get consent (submitted via bot = agreed)
+    const gardensPath = resolve(DATA_DIR, 'gardens.json')
+    const gardensData = existsSync(gardensPath) ? JSON.parse(readFileSync(gardensPath, 'utf-8')) : { gardens: {} }
+    if (!gardensData.gardens) gardensData.gardens = {}
+    const allGardens = new Set(catalog.map((p: any) => p.garden).filter(Boolean))
+    let newConsents = 0
+    for (const g of allGardens) {
+      // Convert hashtag form to display: "РусиновСад" → "Русинов Сад"
+      const display = g.replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2')
+      if (!gardensData.gardens[display]?.consent) {
+        gardensData.gardens[display] = {
+          ...(gardensData.gardens[display] || {}),
+          consent: true,
+          consentAt: new Date().toISOString(),
+          consentSource: 'channel-sync',
+        }
+        newConsents++
+      }
+    }
+    if (newConsents > 0) {
+      writeFileSync(gardensPath, JSON.stringify(gardensData, null, 2))
+      log(`  Auto-consented ${newConsents} new gardens`)
+    }
 
     // Run enrichment
     log('🔧 Running enrichment...')
