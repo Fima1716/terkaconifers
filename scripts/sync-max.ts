@@ -353,6 +353,16 @@ async function main() {
       if (existingByUrl.latin_full !== plant.latin_full) { existingByUrl.latin_full = plant.latin_full; changed = true }
       if (plant.is_russian !== existingByUrl.is_russian) { existingByUrl.is_russian = plant.is_russian; changed = true }
       if (JSON.stringify(plant.hashtags) !== JSON.stringify(existingByUrl.hashtags)) { existingByUrl.hashtags = plant.hashtags; changed = true }
+      // Update garden if changed (post was edited or garden renamed hashtag)
+      if (plant.garden && existingByUrl.garden !== plant.garden) {
+        const oldKey = normKey(existingByUrl.latin_full, existingByUrl.garden)
+        existingByUrl.garden = plant.garden
+        // Update byKey index
+        byKey.delete(oldKey)
+        byKey.set(normKey(existingByUrl.latin_full, existingByUrl.garden), existingByUrl)
+        changed = true
+        log(`  🔀 Garden updated: ${oldKey.split('|||')[1]} → ${plant.garden} (${plant.latin_full})`)
+      }
       // Only update photos if:
       // 1. No local photos (avoid replacing local paths with MAX URLs)
       // 2. This message is not older than what's already stored (don't overwrite newer photos)
