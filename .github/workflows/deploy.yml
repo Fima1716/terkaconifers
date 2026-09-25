@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+env:
+  SSH_OPTS: -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -15,7 +18,16 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Check server is reachable
+        run: |
+          host='${{ secrets.SSH_HOST }}'
+          if [ -z "$host" ]; then echo "::error::secrets.SSH_HOST пуст"; exit 1; fi
+          if ! nc -z -w 20 "$host" 22; then
+            echo "::error::Сервер не отвечает на порту 22 — проверьте SSH_HOST и файрвол"
+            exit 1
+          fi
+          echo "Порт 22 открыт"
 
       - name: Deploy files
         run: |
@@ -30,9 +42,9 @@ jobs:
             --exclude='public/data/' \
             --exclude='logs/' \
             --exclude='.env' \
-            -e "ssh -i ~/.ssh/deploy_key" \
+            -e "ssh $SSH_OPTS" \
             ./ root@${{ secrets.SSH_HOST }}:/var/www/terka/
 
       - name: Install, build & restart
         run: |
-          ssh -i ~/.ssh/deploy_key root@${{ secrets.SSH_HOST }} 'cd /var/www/terka && npm install --production && npx nuxi build && pm2 restart ecosystem.config.cjs'
+          ssh $SSH_OPTS root@${{ secrets.SSH_HOST }} 'cd /var/www/terka && npm install --production && npx nuxi build && pm2 restart ecosystem.config.cjs'
