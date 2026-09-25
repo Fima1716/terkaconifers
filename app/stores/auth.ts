@@ -1,10 +1,26 @@
 import { defineStore } from 'pinia'
 import type { Plant } from '~/stores/catalog'
 
+export type Role = 'super_admin' | 'manager' | 'admin'
+
+/** Подписи ролей для интерфейса */
+export const ROLE_LABELS: Record<Role, string> = {
+  super_admin: 'Администратор',
+  manager: 'Менеджер',
+  admin: 'Садовод',
+}
+
+/** Куда ведём пользователя после входа */
+export const ROLE_HOME: Record<Role, string> = {
+  super_admin: '/admin',
+  manager: '/manage',
+  admin: '/',
+}
+
 interface AuthUser {
   username: string
   displayName: string
-  role: 'super_admin' | 'admin'
+  role: Role
   gardens: string[]
   createdAt: string
   lastLogin: string
@@ -19,7 +35,13 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isLoggedIn: (state) => !!state.user,
     isSuperAdmin: (state) => state.user?.role === 'super_admin',
+    isManager: (state) => state.user?.role === 'manager',
     isAdmin: (state) => !!state.user,
+    /** Менеджерский доступ: карточки растений + текст постов в MAX (без админ-панели) */
+    canManageContent: (state) =>
+      state.user?.role === 'super_admin' || state.user?.role === 'manager',
+    roleLabel: (state) => (state.user ? ROLE_LABELS[state.user.role] : ''),
+    homePath: (state) => (state.user ? ROLE_HOME[state.user.role] : '/'),
     canEditPlant(): boolean {
       return !!this.user
     },

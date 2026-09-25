@@ -5,10 +5,26 @@ import { resolve } from 'path'
 import type { H3Event } from 'h3'
 
 // ── Types ──────────────────────────────────────────────────
+/**
+ * super_admin — полный доступ, включая админ-панель
+ * manager     — правит карточки растений и текст постов в MAX, без админ-панели
+ * admin       — садовод: свои сады (атрибуция)
+ */
+export type Role = 'super_admin' | 'manager' | 'admin'
+
+export const ROLES: Role[] = ['super_admin', 'manager', 'admin']
+
+/** Роли с правом правки контента каталога (карточки + текст постов в MAX) */
+export const CONTENT_ROLES: Role[] = ['super_admin', 'manager']
+
+export function normalizeRole(role: unknown): Role {
+  return ROLES.includes(role as Role) ? (role as Role) : 'admin'
+}
+
 export interface User {
   username: string
   displayName: string
-  role: 'super_admin' | 'admin'
+  role: Role
   gardens: string[]          // assigned gardens (attribution, not restriction)
   passwordHash: string
   salt: string
@@ -18,14 +34,14 @@ export interface User {
 
 export interface UserPayload {
   sub: string
-  role: 'super_admin' | 'admin'
+  role: Role
   gardens: string[]
 }
 
 export interface UserPublic {
   username: string
   displayName: string
-  role: 'super_admin' | 'admin'
+  role: Role
   gardens: string[]
   createdAt: string
   lastLogin: string
@@ -96,7 +112,7 @@ export async function verifyToken(event: H3Event): Promise<UserPayload | null> {
     const { payload } = await jwtVerify(cookie, JWT_SECRET)
     return {
       sub: payload.sub as string,
-      role: payload.role as 'super_admin' | 'admin',
+      role: normalizeRole(payload.role),
       gardens: (payload.gardens as string[]) || [],
     }
   } catch {
@@ -104,13 +120,25 @@ export async function verifyToken(event: H3Event): Promise<UserPayload | null> {
   }
 }
 
-export async function requireAuth(event: H3Event, requiredRole?: 'super_admin' | 'admin'): Promise<UserPayload> {
+/**
+ * Требует авторизацию. `required` — роль или список ролей;
+ * super_admin проходит любую проверку.
+ */
+export async function requireAuth(event: H3Event, required?: Role | Role[]): Promise<UserPayload> {
   const payload = await verifyToken(event)
   if (!payload) throw createError({ statusCode: 401, message: 'Не авторизован' })
-  if (requiredRole === 'super_admin' && payload.role !== 'super_admin') {
-    throw createError({ statusCode: 403, message: 'Недостаточно прав' })
+  if (required) {
+    const allowed = Array.isArray(required) ? required : [required]
+    if (payload.role !== 'super_admin' && !allowed.includes(payload.role)) {
+      throw createError({ statusCode: 403, message: 'Недостаточно прав' })
+    }
   }
   return payload
+}
+
+/** Доступ для редакторов контента: суперадмины и менеджеры */
+export async function requireContentEditor(event: H3Event): Promise<UserPayload> {
+  return requireAuth(event, CONTENT_ROLES)
 }
 
 // ── Cookie helpers ─────────────────────────────────────────

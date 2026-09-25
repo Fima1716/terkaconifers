@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   if (idx < 0) throw createError({ statusCode: 404, message: 'Пользователь не найден' })
 
   if (displayName !== undefined) users[idx].displayName = displayName
-  if (role !== undefined) users[idx].role = role === 'super_admin' ? 'super_admin' : 'admin'
+  if (role !== undefined) users[idx].role = normalizeRole(role)
   if (gardens !== undefined) users[idx].gardens = Array.isArray(gardens) ? gardens : []
 
   // Reset password if provided

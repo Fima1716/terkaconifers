@@ -1,6 +1,8 @@
 import { readFileSync, existsSync } from 'fs'
 
 export default defineEventHandler(async (event) => {
+  await requireAuth(event, 'super_admin')
+
   const query = getQuery(event)
   const userId = query.userId as string | undefined
   const platform = query.platform as string | undefined

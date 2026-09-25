@@ -19,7 +19,7 @@ function buildMaxText(plant: any): string {
 }
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  await requireContentEditor(event)
 
   const id = parseInt(getRouterParam(event, 'id') || '')
   if (!id) throw createError({ statusCode: 400, message: 'Некорректный ID' })

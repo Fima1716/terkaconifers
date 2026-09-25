@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { useCatalogStore } from '~/stores/catalog'
+import { ROLE_LABELS, type Role } from '~/stores/auth'
 
 interface UserPublic {
   username: string
   displayName: string
-  role: 'super_admin' | 'admin'
+  role: Role
   gardens: string[]
   createdAt: string
   lastLogin: string
+}
+
+const ROLE_HINTS: Record<Role, string> = {
+  super_admin: 'Полный доступ, включая админ-панель',
+  manager: 'Менеджерская: карточки растений и текст постов в MAX. Админ-панель закрыта',
+  admin: 'Садовод: свои сады и «Мой сад»',
 }
 
 const catalog = useCatalogStore()
@@ -22,7 +29,7 @@ const form = reactive({
   username: '',
   password: '',
   displayName: '',
-  role: 'admin' as 'admin' | 'super_admin',
+  role: 'manager' as Role,
   gardens: [] as string[],
 })
 
@@ -30,7 +37,7 @@ const form = reactive({
 const editing = ref<string | null>(null)
 const editForm = reactive({
   displayName: '',
-  role: 'admin' as 'admin' | 'super_admin',
+  role: 'manager' as Role,
   gardens: [] as string[],
   password: '',
 })
@@ -68,7 +75,7 @@ async function createUser() {
     await $fetch('/api/admin/users', { method: 'POST', body: { ...form } })
     showMsg(`Пользователь ${form.username} создан`)
     showForm.value = false
-    Object.assign(form, { username: '', password: '', displayName: '', role: 'admin', gardens: [] })
+    Object.assign(form, { username: '', password: '', displayName: '', role: 'manager', gardens: [] })
     await loadUsers()
   } catch (e: any) { showMsg(e?.data?.message || 'Ошибка', 'err') }
 }
@@ -139,9 +146,11 @@ function toggleGarden(list: string[], garden: string) {
         <div class="field">
           <label>Роль</label>
           <select v-model="form.role">
-            <option value="admin">Админ</option>
-            <option value="super_admin">Суперадмин</option>
+            <option value="manager">Менеджер</option>
+            <option value="admin">Садовод</option>
+            <option value="super_admin">Администратор</option>
           </select>
+          <span class="field-hint">{{ ROLE_HINTS[form.role] }}</span>
         </div>
       </div>
       <div class="field">
@@ -173,9 +182,11 @@ function toggleGarden(list: string[], garden: string) {
           <div class="field">
             <label>Роль</label>
             <select v-model="editForm.role">
-              <option value="admin">Админ</option>
-              <option value="super_admin">Суперадмин</option>
+              <option value="manager">Менеджер</option>
+              <option value="admin">Садовод</option>
+              <option value="super_admin">Администратор</option>
             </select>
+            <span class="field-hint">{{ ROLE_HINTS[editForm.role] }}</span>
           </div>
           <div class="field">
             <label>Новый пароль (пустое = не менять)</label>
@@ -207,7 +218,7 @@ function toggleGarden(list: string[], garden: string) {
           <div class="user-main">
             <strong>{{ user.displayName }}</strong>
             <span class="user-username">@{{ user.username }}</span>
-            <span class="role-badge" :class="user.role">{{ user.role === 'super_admin' ? 'Суперадмин' : 'Админ' }}</span>
+            <span class="role-badge" :class="user.role">{{ ROLE_LABELS[user.role] }}</span>
           </div>
           <div v-if="user.gardens.length" class="user-gardens">
             <span v-for="g in user.gardens" :key="g" class="garden-tag">{{ g }}</span>
@@ -242,6 +253,7 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 .field { margin-bottom: 8px; }
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
 .field input, .field select { width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--bg); color: var(--text); box-sizing: border-box; }
+.field-hint { display: block; font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
 
 .garden-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 200px; overflow-y: auto; }
 .garden-chip { padding: 4px 10px; border: 1px solid var(--border); border-radius: 16px; font-size: 12px; background: var(--bg); cursor: pointer; transition: all 0.15s; }
@@ -254,6 +266,7 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 .user-username { font-size: 13px; color: var(--text-muted); }
 .role-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
 .role-badge.super_admin { background: #e8f5e9; color: #2e7d32; }
+.role-badge.manager { background: #fff3e0; color: #e65100; }
 .role-badge.admin { background: #e3f2fd; color: #1565c0; }
 .user-gardens { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
 .garden-tag { font-size: 11px; padding: 2px 8px; background: var(--bg-alt); border-radius: 8px; color: var(--primary); }

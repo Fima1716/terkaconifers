@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   const user: any = {
     username,
     displayName: displayName || username,
-    role: role === 'super_admin' ? 'super_admin' : 'admin',
+    role: normalizeRole(role),
     gardens: Array.isArray(gardens) ? gardens : [],
     passwordHash: hash,
     salt,

@@ -23,5 +23,6 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const auth = useAuthStore()
   await auth.fetchMe()
   if (!auth.isLoggedIn) return navigateTo('/login')
-  if (!auth.isSuperAdmin) return navigateTo('/')
+  // Менеджеров в админ-панель не пускаем — уводим в менеджерскую
+  if (!auth.isSuperAdmin) return navigateTo(auth.canManageContent ? '/manage' : '/')
 })

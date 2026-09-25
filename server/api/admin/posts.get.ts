@@ -2,17 +2,23 @@ import { readFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  await requireContentEditor(event)
 
   const query = getQuery(event)
   const page = parseInt(String(query.page || '1'))
   const limit = parseInt(String(query.limit || '50'))
   const search = String(query.search || '').toLowerCase()
+  const onlyNew = String(query.onlyNew || '') === '1'
 
   const catPath = resolve(process.cwd(), 'public/data/catalog-enriched.json')
   if (!existsSync(catPath)) return { posts: [], total: 0, page, pages: 0 }
 
   let catalog = JSON.parse(readFileSync(catPath, 'utf-8'))
+
+  // Only newly synced posts (то, что чаще всего требует правки)
+  if (onlyNew) {
+    catalog = catalog.filter((p: any) => p.is_new)
+  }
 
   // Search
   if (search) {

@@ -5,7 +5,7 @@ const BASE_URL = 'https://platform-api.max.ru'
 const CATALOG_CHANNEL_ID = '-71324192443065'
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  await requireContentEditor(event)
 
   const id = parseInt(getRouterParam(event, 'id') || '')
   if (!id) throw createError({ statusCode: 400, message: 'Некорректный ID' })

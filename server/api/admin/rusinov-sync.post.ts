@@ -3,7 +3,9 @@ import { promisify } from 'util'
 
 const execAsync = promisify(exec)
 
-export default defineEventHandler(async () => {
+export default defineEventHandler(async (event) => {
+  await requireAuth(event, 'super_admin')
+
   // Find rusadovich directory relative to terka
   const paths = [
     '/var/www/rusadovich',         // production

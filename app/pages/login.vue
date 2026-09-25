@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useAuthStore } from '~/stores/auth'
+import { useAuthStore, ROLE_HOME } from '~/stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -13,7 +13,7 @@ const loading = ref(false)
 onMounted(async () => {
   await auth.fetchMe()
   if (auth.isLoggedIn) {
-    router.replace(auth.isSuperAdmin ? '/admin' : '/')
+    router.replace(auth.homePath)
   }
 })
 
@@ -22,7 +22,7 @@ async function submit() {
   loading.value = true
   try {
     const user = await auth.login(username.value, password.value)
-    router.replace(user.role === 'super_admin' ? '/admin' : '/')
+    router.replace(ROLE_HOME[user.role] || '/')
   } catch (e: any) {
     error.value = e?.data?.message || e?.message || 'Ошибка авторизации'
   } finally {

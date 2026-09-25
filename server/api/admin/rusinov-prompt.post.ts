@@ -2,6 +2,8 @@ import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
 export default defineEventHandler(async (event) => {
+  await requireAuth(event, 'super_admin')
+
   const body = await readBody(event)
   if (!body || typeof body !== 'object') {
     throw createError({ statusCode: 400, message: 'Invalid body' })
