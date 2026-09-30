@@ -269,6 +269,7 @@ const tabs = [
   { id: 'diary', label: 'Дневник', icon: 'diary' },
   { id: 'conditions', label: 'Условия', icon: 'conditions' },
   { id: 'users', label: 'Пользователи', icon: 'users' },
+  { id: 'journal', label: 'Журнал', icon: 'journal' },
   { id: 'bot', label: 'Бот', icon: 'bot' },
 ]
 
@@ -730,6 +731,7 @@ function removeCatalogLink(idx: number) {
               <svg v-else-if="tab.icon === 'diary'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
               <svg v-else-if="tab.icon === 'conditions'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
               <svg v-else-if="tab.icon === 'users'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+              <svg v-else-if="tab.icon === 'journal'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
               <svg v-else-if="tab.icon === 'bot'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1"/><circle cx="15" cy="16" r="1"/><path d="M12 2v4"/><circle cx="12" cy="5" r="2"/><path d="M8 11V9a4 4 0 018 0v2"/></svg>
             </span>
             <span class="nav-label">{{ tab.label }}</span>
@@ -1283,6 +1285,11 @@ function removeCatalogLink(idx: number) {
         <!-- ═══ Users ═══ -->
         <div v-if="activeTab === 'users'" class="page">
           <UserManagement />
+        </div>
+
+        <!-- ═══ Журнал действий ═══ -->
+        <div v-if="activeTab === 'journal'" class="page">
+          <ActionJournal v-if="activeTab === 'journal'" />
         </div>
 
         <!-- ═══ Bot ═══ -->

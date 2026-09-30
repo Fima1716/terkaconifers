@@ -5,8 +5,8 @@ export type Role = 'super_admin' | 'manager' | 'admin'
 
 /** Подписи ролей для интерфейса */
 export const ROLE_LABELS: Record<Role, string> = {
-  super_admin: 'Администратор',
-  manager: 'Менеджер',
+  super_admin: 'Главный админ',
+  manager: 'Админ',
   admin: 'Садовод',
 }
 

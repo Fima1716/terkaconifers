@@ -12,8 +12,8 @@ interface UserPublic {
 }
 
 const ROLE_HINTS: Record<Role, string> = {
-  super_admin: 'Полный доступ, включая админ-панель',
-  manager: 'Менеджерская: карточки растений и текст постов в MAX. Админ-панель закрыта',
+  super_admin: 'Полный доступ, включая эту админку и журнал действий',
+  manager: 'Панель админа: карточки растений и текст постов в MAX. Эта админка закрыта',
   admin: 'Садовод: свои сады и «Мой сад»',
 }
 
@@ -146,9 +146,9 @@ function toggleGarden(list: string[], garden: string) {
         <div class="field">
           <label>Роль</label>
           <select v-model="form.role">
-            <option value="manager">Менеджер</option>
+            <option value="manager">Админ</option>
             <option value="admin">Садовод</option>
-            <option value="super_admin">Администратор</option>
+            <option value="super_admin">Главный админ</option>
           </select>
           <span class="field-hint">{{ ROLE_HINTS[form.role] }}</span>
         </div>
@@ -182,9 +182,9 @@ function toggleGarden(list: string[], garden: string) {
           <div class="field">
             <label>Роль</label>
             <select v-model="editForm.role">
-              <option value="manager">Менеджер</option>
+              <option value="manager">Админ</option>
               <option value="admin">Садовод</option>
-              <option value="super_admin">Администратор</option>
+              <option value="super_admin">Главный админ</option>
             </select>
             <span class="field-hint">{{ ROLE_HINTS[editForm.role] }}</span>
           </div>

@@ -46,7 +46,7 @@ function buildMaxText(plant: any): string {
 }
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event)
+  const user = await requireAuth(event)
 
   const id = parseInt(getRouterParam(event, 'id') || '')
   if (!id) throw createError({ statusCode: 400, message: 'Некорректный ID' })
@@ -81,7 +81,8 @@ export default defineEventHandler(async (event) => {
 
   if (!plant) throw createError({ statusCode: 404, message: 'Растение не найдено в исходном каталоге' })
 
-  // Apply editable fields
+  // Apply editable fields (снимок до правки — для журнала)
+  const before = { ...plant }
   let textChanged = false
   for (const field of EDITABLE_FIELDS) {
     if (updates[field] !== undefined && updates[field] !== plant[field]) {
@@ -105,6 +106,21 @@ export default defineEventHandler(async (event) => {
 
   // Save raw catalog
   writeFileSync(catalogPath, JSON.stringify(catalog))
+
+  // Журнал действий
+  const changes = diffFields(before, updates, EDITABLE_FIELDS)
+  if (photosChanged) {
+    changes.push({
+      field: 'photos',
+      from: `${(before.photos || []).length} фото`,
+      to: `${updates.photos.length} фото`,
+    })
+  }
+  logFor(event, user, 'plant.update', {
+    targetId: id,
+    title: plant.latin_full || enrichedPlant.latin_full,
+    changes,
+  })
 
   // Edit post in MAX messenger (only when text fields changed, not photo reorder)
   let maxEdited = false

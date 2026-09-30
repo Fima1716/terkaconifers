@@ -5,7 +5,7 @@ const BASE_URL = 'https://platform-api.max.ru'
 const CATALOG_CHANNEL_ID = '-71324192443065'
 
 export default defineEventHandler(async (event) => {
-  await requireContentEditor(event)
+  const user = await requireContentEditor(event)
 
   const id = parseInt(getRouterParam(event, 'id') || '')
   if (!id) throw createError({ statusCode: 400, message: 'Некорректный ID' })
@@ -17,6 +17,8 @@ export default defineEventHandler(async (event) => {
   const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'))
   const plant = catalog.find((p: any) => p._site_id === id || p.id === id)
   if (!plant) throw createError({ statusCode: 404, message: 'Растение не найдено' })
+
+  const beforePlant = { ...plant }
 
   // Parse text back into catalog fields
   const lines = text.split('\n')
@@ -99,6 +101,14 @@ export default defineEventHandler(async (event) => {
       cwd: process.cwd(), timeout: 30000, stdio: 'ignore',
     })
   } catch {}
+
+  logFor(event, user, 'maxtext.update', {
+    targetId: id,
+    title: plant.latin_full,
+    changes: diffFields(beforePlant, plant, ['latin_full', 'name_ru', 'region', 'age', 'size', 'originator', 'garden']),
+    note: maxEdited ? 'обновлено в канале MAX' : mid ? 'MAX не подтвердил правку' : 'пост не привязан к MAX',
+    ok: maxEdited || !mid,
+  })
 
   return { ok: true, maxEdited, hasMid: !!mid }
 })

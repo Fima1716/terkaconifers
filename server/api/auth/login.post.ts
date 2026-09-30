@@ -24,6 +24,14 @@ export default defineEventHandler(async (event) => {
 
   resetRateLimit(ip)
 
+  logAction({
+    user: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    action: 'auth.login',
+    ip,
+  })
+
   const token = await signToken(user)
   setAuthCookie(event, token)
 
