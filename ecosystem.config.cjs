@@ -1,3 +1,23 @@
+/**
+ * PM2-конфиг для деплоя.
+ *
+ * Здесь описан ТОЛЬКО сайт. Боты на сервере запущены отдельно и живут
+ * под своими именами:
+ *
+ *   terka-bot   — «Леший»,  npx tsx scripts/bot.ts      (порт 3001)
+ *   rusadovich  — «РуСадович» + Публикатор, /root/run.sh (порт 3002)
+ *   terka-tg    — Telegram-мост, /root/run-tg-bridge.sh
+ *
+ * Раньше в этом файле были ещё записи `leshy` и `rusinov` с теми же
+ * командами. Каждый деплой выполняет `pm2 restart ecosystem.config.cjs`
+ * и поднимал их как ВТОРЫЕ копии уже работающих ботов. Занять порт они
+ * не могли и падали по EADDRINUSE в бесконечном цикле: у `leshy`
+ * накопилось 1.37 млн рестартов и 1.6 ГБ логов ошибок.
+ *
+ * Если боты когда-нибудь понадобятся в этом файле — сначала удалите
+ * старые процессы (`pm2 delete terka-bot rusadovich`), иначе дубли
+ * вернутся.
+ */
 module.exports = {
   apps: [
     {
@@ -11,26 +31,6 @@ module.exports = {
       },
       error_file: './logs/error.log',
       out_file: './logs/out.log',
-      merge_logs: true,
-      log_date_format: 'YYYY-MM-DD HH:mm:ss',
-    },
-    {
-      name: 'leshy',
-      script: 'npx',
-      args: 'tsx scripts/bot.ts',
-      cwd: '/var/www/terka',
-      error_file: './logs/leshy-error.log',
-      out_file: './logs/leshy-out.log',
-      merge_logs: true,
-      log_date_format: 'YYYY-MM-DD HH:mm:ss',
-    },
-    {
-      name: 'rusinov',
-      script: 'npx',
-      args: 'tsx src/index.ts',
-      cwd: '/var/www/terka/rusinovich',
-      error_file: './logs/rusinov-error.log',
-      out_file: './logs/rusinov-out.log',
       merge_logs: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
     },
