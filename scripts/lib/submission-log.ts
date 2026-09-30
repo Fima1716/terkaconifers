@@ -57,6 +57,17 @@ function safeId(id: string): string {
 }
 
 /**
+ * Прячет токены в ссылках перед записью в журнал.
+ * Ссылки Telegram имеют вид /file/bot<ТОКЕН>/..., и хранить их
+ * как есть — значит разложить токен бота по файлам на диске.
+ */
+export function maskUrl(url: string): string {
+  return String(url || '')
+    .replace(/\/bot\d+:[A-Za-z0-9_-]+/g, '/bot***')
+    .replace(/([?&](?:access_token|token|key)=)[^&]+/gi, '$1***')
+}
+
+/**
  * Скачивает фото заявки на диск, чтобы её можно было восстановить даже
  * когда ссылки MAX перестанут открываться. Возвращает пути относительно
  * data/. Никогда не бросает: часть фото может не скачаться.
@@ -90,7 +101,7 @@ export async function archivePhotos(subId: string, urls: string[]): Promise<stri
   }
 
   // Рядом с фото кладём исходные ссылки — вдруг понадобятся
-  try { writeFileSync(join(dir, 'urls.json'), JSON.stringify(urls, null, 2)) } catch {}
+  try { writeFileSync(join(dir, 'urls.json'), JSON.stringify(urls.map(maskUrl), null, 2)) } catch {}
 
   return saved
 }
@@ -126,7 +137,9 @@ function load(): SubmissionEntry[] {
 export function logSubmission(entry: Omit<SubmissionEntry, 'ts'> & { ts?: string }) {
   try {
     const entries = load()
-    entries.push({ ...entry, ts: entry.ts || new Date().toISOString() })
+    const safe = { ...entry, ts: entry.ts || new Date().toISOString() }
+    if (safe.photoUrls?.length) safe.photoUrls = safe.photoUrls.map(maskUrl)
+    entries.push(safe)
 
     if (entries.length > ARCHIVE_AT) {
       const cut = entries.length - MAX_ENTRIES
