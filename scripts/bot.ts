@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { createServer } from 'http'
 import { resolve } from 'path'
 import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden, loadPublications, removePublication } from './lib/dupe-check.js'
+import { logSubmission, findStuck } from './lib/submission-log.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const STATE_FILE = resolve(ROOT, 'data/bot-state.json')
@@ -38,6 +39,8 @@ const WEBHOOK_SECRET = env.WEBHOOK_SECRET || ''
 const WEBHOOK_URL = env.WEBHOOK_URL || '' // e.g. https://terkaconifers.ru/webhook/leshy
 
 const PROTECTED_CATALOG_ID = '-71324192443065'
+const TG_TOKEN = env.TG_BOT_TOKEN || ''
+const TG_API = `https://api.telegram.org/bot${TG_TOKEN}`
 
 if (!TOKEN) { console.error('No MAX_BOT_TOKEN in .env'); process.exit(1) }
 if (String(ADMIN_CHAT_ID) === PROTECTED_CATALOG_ID) {
@@ -212,6 +215,35 @@ async function send(chatId: number | string, text: string, attachments?: any[], 
   return resp.json()
 }
 
+/**
+ * Публикация в канал С ПРОВЕРКОЙ результата.
+ *
+ * Обычный send() возвращает тело ответа не глядя на HTTP-код, поэтому
+ * бот раньше рапортовал «Опубликовано» даже когда канал ответил ошибкой.
+ * Здесь публикация считается успешной, только если MAX вернул mid поста.
+ */
+async function publishToChannel(text: string, attachments?: any[]): Promise<{ ok: boolean; mid: string; error?: string }> {
+  const body: any = { text }
+  if (attachments?.length) body.attachments = attachments
+  try {
+    const resp = await fetch(`${BASE_URL}/messages?chat_id=${PROTECTED_CATALOG_ID}`, {
+      method: 'POST', headers: H, body: JSON.stringify(body),
+    })
+    let data: any = null
+    try { data = await resp.json() } catch {}
+    const mid = data?.message?.body?.mid || ''
+    if (!resp.ok) {
+      return { ok: false, mid: '', error: `HTTP ${resp.status}: ${data?.message || data?.code || 'нет тела ответа'}` }
+    }
+    if (!mid) {
+      return { ok: false, mid: '', error: 'MAX не вернул id сообщения — пост в канал не попал' }
+    }
+    return { ok: true, mid }
+  } catch (e: any) {
+    return { ok: false, mid: '', error: `сеть: ${e?.message || e}` }
+  }
+}
+
 async function answerCallback(cbId: string, note?: string) {
   await fetch(`${BASE_URL}/answers/callback?callback_id=${cbId}`, {
     method: 'POST', headers: H, body: JSON.stringify(note ? { notification: note } : {}),
@@ -232,6 +264,61 @@ async function deleteMessage(mid: string): Promise<boolean> {
     method: 'DELETE', headers: H,
   })
   return resp.ok
+}
+
+// ── TG API (for relaying to Telegram users) ─────────────
+const TG_BRIDGE_STATE_FILE = resolve(ROOT, 'data/tg-bridge-state.json')
+
+interface TgTarget {
+  tgChatId: number
+  tgUserId: number
+  userName: string
+  photos: string[]
+  origText: string
+  tgMsgId?: number
+}
+
+interface TgBridgeState {
+  consented: Record<string, boolean>
+  banned: Record<string, boolean>
+  midMap: Record<string, TgTarget>
+  pendingPublish: Record<string, { photos: string[]; userName: string; aiText?: string }>
+  tgToMax: Record<string, string>
+}
+
+function loadTgState(): TgBridgeState {
+  if (existsSync(TG_BRIDGE_STATE_FILE)) {
+    try {
+      const s = JSON.parse(readFileSync(TG_BRIDGE_STATE_FILE, 'utf-8'))
+      return { consented: s.consented || {}, banned: s.banned || {}, midMap: s.midMap || {}, pendingPublish: s.pendingPublish || {}, tgToMax: s.tgToMax || {} }
+    } catch {}
+  }
+  return { consented: {}, banned: {}, midMap: {}, pendingPublish: {}, tgToMax: {} }
+}
+
+function saveTgState(s: TgBridgeState) {
+  const entries = Object.entries(s.midMap)
+  if (entries.length > 1000) s.midMap = Object.fromEntries(entries.slice(-1000)) as any
+  const tgEntries = Object.entries(s.tgToMax)
+  if (tgEntries.length > 1000) s.tgToMax = Object.fromEntries(tgEntries.slice(-1000))
+  writeFileSync(TG_BRIDGE_STATE_FILE, JSON.stringify(s, null, 2))
+}
+
+async function tgSend(chatId: number, text: string, replyTo?: number) {
+  if (!TG_TOKEN) return null
+  try {
+    const resp = await fetch(`${TG_API}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        ...(replyTo ? { reply_parameters: { message_id: replyTo } } : {}),
+      }),
+    })
+    return resp.json() as any
+  } catch (e) { log(`TG send error: ${e}`); return null }
 }
 
 // Duplicate detection — uses shared lib (catalog + recent publications + pending both bots)
@@ -363,6 +450,132 @@ Picea pungens 'Hoopsii'
 ——————
 
 Мы рассмотрим и ответим вам здесь.`
+
+// ── Process TG-bridge admin replies ──────────────────────
+// Handles "+", "-", text replies for submissions that came from TG bot
+async function processTgAdminReply(replyMid: string, text: string, adminName: string, msg: any, tgState: TgBridgeState, tgTarget: TgTarget | undefined, tgPending: any) {
+  const NEXT_STEP_TG = '\n\nЧтобы предложить ещё — отправьте фото (1–3 шт.) с описанием.'
+
+  // Pending publish (admin approves text for channel)
+  if (tgPending && text) {
+    const isApprove = text.trim() === '+' || text.trim().toLowerCase() === 'ок' || text.trim().toLowerCase() === 'ok'
+    let publishText = isApprove && tgPending.aiText ? tgPending.aiText : text
+    publishText = publishText.replace(/\n?——————[\s\S]*$/, '').replace(/\n?📌 Что делать:[\s\S]*$/, '').trim()
+    const pubAttachments = tgPending.photos.map((url: string) => ({ type: 'image', payload: { url } }))
+    const firstLine = publishText.split('\n').filter(Boolean)[0] || ''
+    const pub = await publishToChannel(publishText, pubAttachments)
+
+    // Публикация не прошла — заявку сохраняем, админу говорим прямо
+    if (!pub.ok) {
+      logSubmission({
+        stage: 'publish_failed', source: 'tg', author: tgPending.userName, admin: adminName,
+        latin: firstLine, photos: tgPending.photos.length, askMid: replyMid, ok: false, error: pub.error,
+      })
+      await send(ADMIN_CHAT_ID,
+        `❌ [TG] НЕ опубликовано в канале!\n` +
+        `Растение: ${firstLine}\nАвтор заявки: ${tgPending.userName}\n\n` +
+        `Причина: ${pub.error}\n\n` +
+        `Заявка сохранена — ответьте на то же сообщение ещё раз, чтобы повторить.`)
+      log(`[TG] PUBLISH FAILED: ${firstLine} — ${pub.error}`)
+      saveTgState(tgState)
+      return
+    }
+
+    const channelMid = pub.mid
+    logSubmission({
+      stage: 'published', source: 'tg', author: tgPending.userName, admin: adminName,
+      latin: firstLine, photos: tgPending.photos.length, askMid: replyMid, channelMid, ok: true,
+    })
+    await send(ADMIN_CHAT_ID, `📢 [TG] Опубликовано в канале. Автор: ${tgPending.userName}`)
+
+    const parsed = parseLatinName(publishText)
+    if (parsed) addPublication(parsed.normalized, '', 'tg', { channelMid, text: firstLine, author: tgPending.userName })
+
+    delete tgState.pendingPublish[replyMid]
+    saveTgState(tgState)
+    log(`[TG] Published to channel: ${publishText.substring(0, 50)} (from ${tgPending.userName})`)
+    return
+  }
+
+  if (!tgTarget) return
+
+  // /ban
+  if (text === '/ban') {
+    tgState.banned[String(tgTarget.tgUserId)] = true
+    saveTgState(tgState)
+    await send(ADMIN_CHAT_ID, `🚫 TG-пользователь ${tgTarget.userName} (#TG${tgTarget.tgUserId}) заблокирован.`)
+    await tgSend(tgTarget.tgChatId, '🚫 Вы заблокированы.', tgTarget.tgMsgId)
+    log(`[TG] Banned: ${tgTarget.userName}`)
+    return
+  }
+
+  // /unban
+  if (text === '/unban') {
+    delete tgState.banned[String(tgTarget.tgUserId)]
+    saveTgState(tgState)
+    await send(ADMIN_CHAT_ID, `✅ TG-пользователь ${tgTarget.userName} разблокирован.`)
+    log(`[TG] Unbanned: ${tgTarget.userName}`)
+    return
+  }
+
+  // "+" → accept
+  if (text.trim() === '+') {
+    const photos = tgTarget.photos || []
+    if (!photos.length) {
+      await send(ADMIN_CHAT_ID, `⚠️ В этом сообщении нет фото. Ответьте + на сообщение с фото от ${tgTarget.userName}.`)
+      return
+    }
+
+    await tgSend(tgTarget.tgChatId, `✅ Ваше фото принято! Спасибо за вклад в каталог «Территория хвойных».${NEXT_STEP_TG}`, tgTarget.tgMsgId)
+
+    const origText = tgTarget.origText || msg.link?.message?.text || msg.link?.message?.body?.text || ''
+    log(`[TG]   origText for AI/dupe: "${origText.substring(0, 80)}"`)
+
+    const formatted = origText ? await formatWithAI(origText) : null
+
+    let dupeResult = findAllDuplicates(origText)
+    if (!dupeResult && formatted) dupeResult = findAllDuplicates(formatted)
+    const submittedGarden = formatted ? extractGarden(formatted) : ''
+    const dupeWarning = dupeResult ? formatDupeWarning(dupeResult.matches, submittedGarden) : ''
+
+    let askText: string
+    if (formatted) {
+      askText = `✅ [TG] Заявка от ${tgTarget.userName} принята.${dupeWarning}\n\n🤖 Текст:\n——————\n${formatted}\n——————\n\n«ок» → опубликовать, или ответьте своим текстом`
+    } else {
+      askText = `✅ [TG] Заявка от ${tgTarget.userName} принята.${dupeWarning}\n\nОтветьте текстом для публикации.`
+    }
+
+    const askResult: any = await send(ADMIN_CHAT_ID, askText)
+    const askMid = askResult?.message?.body?.mid
+    if (askMid) {
+      tgState.pendingPublish[askMid] = { photos, userName: tgTarget.userName, aiText: formatted || undefined }
+      tgState.midMap[askMid] = { tgChatId: tgTarget.tgChatId, tgUserId: tgTarget.tgUserId, userName: tgTarget.userName, photos, origText }
+    }
+    saveTgState(tgState)
+    logSubmission({ stage: 'accepted', source: 'tg', author: tgTarget.userName, admin: adminName, latin: (formatted || '').split('\n')[0]?.slice(0, 80), photos: photos.length, askMid })
+    log(`[TG] Accepted: ${tgTarget.userName} by ${adminName}`)
+    return
+  }
+
+  // "-" → reject
+  if (text.trim() === '-') {
+    await tgSend(tgTarget.tgChatId, `🙏 Спасибо за заявку! К сожалению, растение не подошло по критериям.${NEXT_STEP_TG}`, tgTarget.tgMsgId)
+    await send(ADMIN_CHAT_ID, `❌ [TG] Заявка от ${tgTarget.userName} отклонена.`)
+    saveTgState(tgState)
+    logSubmission({ stage: 'rejected', source: 'tg', author: tgTarget.userName, admin: adminName, askMid: replyMid })
+    log(`[TG] Rejected: ${tgTarget.userName} by ${adminName}`)
+    return
+  }
+
+  // Any other reply → relay to TG user
+  const tgReply = await tgSend(tgTarget.tgChatId, `💬 Ответ от модератора:\n\n${text}`, tgTarget.tgMsgId)
+  const tgBotMsgId = tgReply?.result?.message_id
+  if (tgBotMsgId && replyMid) {
+    tgState.tgToMax[String(tgBotMsgId)] = replyMid
+    saveTgState(tgState)
+  }
+  log(`[TG] Reply → ${tgTarget.userName}: ${text.substring(0, 50)}`)
+}
 
 // ── Process updates ────────────────────────────────────────
 async function process(update: any) {
@@ -602,7 +815,20 @@ async function process(update: any) {
     if (!replyMid) return
 
     const target = state.midMap[replyMid]
-    if (!target) return
+
+    // ── Check if this is a TG-bridge submission ──
+    const tgState = loadTgState()
+    const tgTarget = tgState.midMap[replyMid]
+    const tgPending = tgState.pendingPublish[replyMid]
+
+    // If neither our midMap nor tg-bridge knows about this reply, skip
+    if (!target && !tgTarget && !tgPending) return
+
+    // ── Handle TG-bridge submissions ──
+    if (tgTarget || tgPending) {
+      await processTgAdminReply(replyMid, text, name, msg, tgState, tgTarget, tgPending)
+      return
+    }
 
     // ── Handle pending edit reply ──
     const pendingEdit = state.pendingEdit[replyMid]
@@ -709,6 +935,7 @@ async function process(update: any) {
       }
 
       saveState(state)
+      logSubmission({ stage: 'accepted', source: 'max', author: target.userName, admin: name, latin: (formatted || origText || '').split('\n')[0]?.slice(0, 80), photos: photos.length, askMid })
       log(`Accepted: ${target.userName} by ${name}, AI formatted: ${!!formatted}`)
       return
     }
@@ -719,6 +946,7 @@ async function process(update: any) {
       await send(target.chatId, userMsg)
       await send(ADMIN_CHAT_ID, `❌ Заявка от ${target.userName} отклонена.`)
       saveState(state)
+      logSubmission({ stage: 'rejected', source: 'max', author: target.userName, admin: name, askMid: replyMid })
       log(`Rejected: ${target.userName} by ${name}`)
       return
     }
@@ -733,13 +961,34 @@ async function process(update: any) {
       publishText = publishText.replace(/\n?——————[\s\S]*$/, '').replace(/\n?📌 Что делать:[\s\S]*$/, '').trim()
 
       const pubAttachments = pending.photos.map((url: string) => ({ type: 'image', payload: { url } }))
-      const pubResult: any = await send(PROTECTED_CATALOG_ID, publishText, pubAttachments.length ? pubAttachments : undefined)
-      const channelMid = pubResult?.message?.body?.mid || ''
+      const firstLine = publishText.split('\n').filter(Boolean)[0] || ''
+      const pub = await publishToChannel(publishText, pubAttachments)
+
+      // Публикация не прошла — НЕ удаляем заявку, честно говорим админу
+      if (!pub.ok) {
+        logSubmission({
+          stage: 'publish_failed', source: 'max', author: pending.userName, admin: name,
+          latin: firstLine, photos: pending.photos.length, askMid: replyMid, ok: false, error: pub.error,
+        })
+        await send(ADMIN_CHAT_ID,
+          `❌ НЕ опубликовано в канале!\n` +
+          `Растение: ${firstLine}\nАвтор заявки: ${pending.userName}\n\n` +
+          `Причина: ${pub.error}\n\n` +
+          `Заявка сохранена — ответьте на то же сообщение ещё раз, чтобы повторить публикацию.`)
+        log(`PUBLISH FAILED (max): ${firstLine} — ${pub.error}`)
+        saveState(state)
+        return
+      }
+
+      const channelMid = pub.mid
+      logSubmission({
+        stage: 'published', source: 'max', author: pending.userName, admin: name,
+        latin: firstLine, photos: pending.photos.length, askMid: replyMid, channelMid, ok: true,
+      })
       await send(ADMIN_CHAT_ID, `📢 Опубликовано в канале «Территория хвойных».\nАвтор заявки: ${pending.userName}`)
 
       // Record in shared publication cache (cross-bot duplicate detection)
       const parsed = parseLatinName(publishText)
-      const firstLine = publishText.split('\n').filter(Boolean)[0] || ''
       if (parsed) addPublication(parsed.normalized, '', 'max', { channelMid, text: firstLine, author: pending.userName })
 
       // Track garden ownership: userId → garden name
@@ -896,6 +1145,7 @@ async function process(update: any) {
     await send(chatId, '📋 Заявка получена! Администраторы рассмотрят и ответят вам здесь.')
   }
 
+  logSubmission({ stage: 'received', source: 'max', author: name, latin: text.split('\n')[0]?.slice(0, 80), photos: photos.length })
   log(`Forwarded from ${name}: ${photos.length} photos, ${text.substring(0, 40)}`)
 }
 
@@ -950,5 +1200,38 @@ function startServer() {
   })
 }
 
+/**
+ * Сторож: ищет заявки, принятые сутки назад и так и не опубликованные,
+ * и сообщает о них в «Корзину». Чтобы потери не всплывали через месяцы.
+ */
+let lastStuckReport = ''
+async function checkStuck() {
+  try {
+    const stuck = findStuck(24)
+    if (!stuck.length) return
+
+    // Не повторяем один и тот же список чаще раза в сутки
+    const key = stuck.map(s => s.askMid).sort().join(',')
+    const today = new Date().toISOString().slice(0, 10)
+    if (lastStuckReport === `${today}|${key}`) return
+    lastStuckReport = `${today}|${key}`
+
+    const lines = stuck.slice(0, 15).map(s =>
+      `• ${s.latin || 'без названия'} — от ${s.author || '?'}, принял(а) ${s.admin || '?'}, ${new Date(s.ts).toLocaleDateString('ru')}`
+    )
+    await send(ADMIN_CHAT_ID,
+      `⚠️ Зависшие заявки: ${stuck.length} шт.\n` +
+      `Приняты больше суток назад, но в канал не ушли:\n\n${lines.join('\n')}` +
+      (stuck.length > 15 ? `\n\n…и ещё ${stuck.length - 15}` : ''))
+    log(`Stuck submissions reported: ${stuck.length}`)
+  } catch (e) {
+    log(`checkStuck error: ${e}`)
+  }
+}
+
 log(`🌲 Bot "Леший" started → ADMIN_CHAT_ID=${ADMIN_CHAT_ID}`)
 registerWebhook().then(startServer)
+
+// Сторож: через минуту после старта и далее раз в час
+setTimeout(checkStuck, 60_000)
+setInterval(checkStuck, 3600_000)
