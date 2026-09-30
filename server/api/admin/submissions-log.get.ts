@@ -1,5 +1,25 @@
-import { readFileSync, existsSync } from 'fs'
-import { resolve } from 'path'
+import { readFileSync, existsSync, statSync, readdirSync } from 'fs'
+import { resolve, join } from 'path'
+
+/** Размер архива фотографий, МБ */
+function archiveSizeMb(): number {
+  const base = resolve(process.cwd(), 'data/submissions-archive')
+  let bytes = 0
+  const walk = (d: string) => {
+    let items: string[] = []
+    try { items = readdirSync(d) } catch { return }
+    for (const it of items) {
+      const f = join(d, it)
+      try {
+        const st = statSync(f)
+        if (st.isDirectory()) walk(f)
+        else bytes += st.size
+      } catch {}
+    }
+  }
+  walk(base)
+  return Math.round(bytes / 1048576 * 10) / 10
+}
 
 interface Entry {
   ts: string
@@ -13,6 +33,10 @@ interface Entry {
   channelMid?: string
   ok?: boolean
   error?: string
+  text?: string
+  aiText?: string
+  photoUrls?: string[]
+  files?: string[]
 }
 
 /** Журнал заявок бота «Леший»: пришла → принята → опубликована (или нет) */
@@ -27,7 +51,7 @@ export default defineEventHandler(async (event) => {
 
   const path = resolve(process.cwd(), 'data/submissions-log.json')
   if (!existsSync(path)) {
-    return { entries: [], total: 0, page, pages: 1, stuck: [], failures: 0, counts: {} }
+    return { entries: [], total: 0, page, pages: 1, stuck: [], failures: 0, counts: {}, archiveMb: 0, archived: 0 }
   }
 
   let all: Entry[] = []
@@ -80,5 +104,7 @@ export default defineEventHandler(async (event) => {
     stuck,
     failures,
     counts,
+    archiveMb: archiveSizeMb(),
+    archived: all.reduce((n, e) => n + (e.files?.length || 0), 0),
   }
 })

@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { createServer } from 'http'
 import { resolve } from 'path'
 import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden, loadPublications, removePublication } from './lib/dupe-check.js'
-import { logSubmission, findStuck } from './lib/submission-log.js'
+import { logSubmission, findStuck, archivePhotos } from './lib/submission-log.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const STATE_FILE = resolve(ROOT, 'data/bot-state.json')
@@ -469,7 +469,8 @@ async function processTgAdminReply(replyMid: string, text: string, adminName: st
     if (!pub.ok) {
       logSubmission({
         stage: 'publish_failed', source: 'tg', author: tgPending.userName, admin: adminName,
-        latin: firstLine, photos: tgPending.photos.length, askMid: replyMid, ok: false, error: pub.error,
+        latin: firstLine, photos: tgPending.photos.length, photoUrls: tgPending.photos,
+        text: publishText, askMid: replyMid, ok: false, error: pub.error,
       })
       await send(ADMIN_CHAT_ID,
         `❌ [TG] НЕ опубликовано в канале!\n` +
@@ -484,7 +485,8 @@ async function processTgAdminReply(replyMid: string, text: string, adminName: st
     const channelMid = pub.mid
     logSubmission({
       stage: 'published', source: 'tg', author: tgPending.userName, admin: adminName,
-      latin: firstLine, photos: tgPending.photos.length, askMid: replyMid, channelMid, ok: true,
+      latin: firstLine, photos: tgPending.photos.length, photoUrls: tgPending.photos,
+      text: publishText, askMid: replyMid, channelMid, ok: true,
     })
     await send(ADMIN_CHAT_ID, `📢 [TG] Опубликовано в канале. Автор: ${tgPending.userName}`)
 
@@ -552,7 +554,14 @@ async function processTgAdminReply(replyMid: string, text: string, adminName: st
       tgState.midMap[askMid] = { tgChatId: tgTarget.tgChatId, tgUserId: tgTarget.tgUserId, userName: tgTarget.userName, photos, origText }
     }
     saveTgState(tgState)
-    logSubmission({ stage: 'accepted', source: 'tg', author: tgTarget.userName, admin: adminName, latin: (formatted || '').split('\n')[0]?.slice(0, 80), photos: photos.length, askMid })
+    const accFilesTg = await archivePhotos(replyMid, photos)
+    logSubmission({
+      stage: 'accepted', source: 'tg', author: tgTarget.userName, admin: adminName,
+      latin: (formatted || '').split('\n')[0]?.slice(0, 80),
+      text: origText, aiText: formatted || undefined,
+      photos: photos.length, photoUrls: photos, files: accFilesTg,
+      askMid, srcMid: replyMid,
+    })
     log(`[TG] Accepted: ${tgTarget.userName} by ${adminName}`)
     return
   }
@@ -935,7 +944,14 @@ async function process(update: any) {
       }
 
       saveState(state)
-      logSubmission({ stage: 'accepted', source: 'max', author: target.userName, admin: name, latin: (formatted || origText || '').split('\n')[0]?.slice(0, 80), photos: photos.length, askMid })
+      const accFiles = await archivePhotos(replyMid, photos)
+      logSubmission({
+        stage: 'accepted', source: 'max', author: target.userName, admin: name,
+        latin: (formatted || origText || '').split('\n')[0]?.slice(0, 80),
+        text: origText, aiText: formatted || undefined,
+        photos: photos.length, photoUrls: photos, files: accFiles,
+        askMid, srcMid: replyMid,
+      })
       log(`Accepted: ${target.userName} by ${name}, AI formatted: ${!!formatted}`)
       return
     }
@@ -968,7 +984,8 @@ async function process(update: any) {
       if (!pub.ok) {
         logSubmission({
           stage: 'publish_failed', source: 'max', author: pending.userName, admin: name,
-          latin: firstLine, photos: pending.photos.length, askMid: replyMid, ok: false, error: pub.error,
+          latin: firstLine, photos: pending.photos.length, photoUrls: pending.photos,
+          text: publishText, askMid: replyMid, ok: false, error: pub.error,
         })
         await send(ADMIN_CHAT_ID,
           `❌ НЕ опубликовано в канале!\n` +
@@ -983,7 +1000,8 @@ async function process(update: any) {
       const channelMid = pub.mid
       logSubmission({
         stage: 'published', source: 'max', author: pending.userName, admin: name,
-        latin: firstLine, photos: pending.photos.length, askMid: replyMid, channelMid, ok: true,
+        latin: firstLine, photos: pending.photos.length, photoUrls: pending.photos,
+        text: publishText, askMid: replyMid, channelMid, ok: true,
       })
       await send(ADMIN_CHAT_ID, `📢 Опубликовано в канале «Территория хвойных».\nАвтор заявки: ${pending.userName}`)
 
@@ -1145,8 +1163,16 @@ async function process(update: any) {
     await send(chatId, '📋 Заявка получена! Администраторы рассмотрят и ответят вам здесь.')
   }
 
-  logSubmission({ stage: 'received', source: 'max', author: name, latin: text.split('\n')[0]?.slice(0, 80), photos: photos.length })
-  log(`Forwarded from ${name}: ${photos.length} photos, ${text.substring(0, 40)}`)
+  // Архивируем заявку целиком: полный текст + сами фото на диск.
+  // Ссылки MAX однажды перестанут открываться — тогда останутся копии.
+  const subId = mid || `t${Date.now()}`
+  const files = await archivePhotos(subId, photos)
+  logSubmission({
+    stage: 'received', source: 'max', author: name,
+    latin: text.split('\n')[0]?.slice(0, 80),
+    text, photos: photos.length, photoUrls: photos, files, srcMid: mid,
+  })
+  log(`Forwarded from ${name}: ${photos.length} photos (${files.length} архивировано), ${text.substring(0, 40)}`)
 }
 
 // ── Logging ────────────────────────────────────────────────

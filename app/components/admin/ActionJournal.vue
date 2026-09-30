@@ -25,6 +25,10 @@ interface SubEntry {
   channelMid?: string
   ok?: boolean
   error?: string
+  text?: string
+  aiText?: string
+  photoUrls?: string[]
+  files?: string[]
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -104,6 +108,23 @@ const subCounts = ref<Record<string, number>>({})
 const subTotal = ref(0)
 const subStage = ref('')
 const subsLoaded = ref(false)
+const archiveMb = ref(0)
+const archived = ref(0)
+const opened = ref<Set<string>>(new Set())
+
+function toggle(key: string) {
+  const next = new Set(opened.value)
+  next.has(key) ? next.delete(key) : next.add(key)
+  opened.value = next
+}
+
+function fileUrl(rel: string) {
+  return `/api/admin/submission-file?path=${encodeURIComponent(rel)}`
+}
+
+async function copyText(t: string) {
+  try { await navigator.clipboard.writeText(t) } catch {}
+}
 
 async function loadSubs() {
   loading.value = true
@@ -117,6 +138,8 @@ async function loadSubs() {
     failures.value = d.failures
     subCounts.value = d.counts
     subTotal.value = d.total
+    archiveMb.value = d.archiveMb || 0
+    archived.value = d.archived || 0
     subsLoaded.value = true
   } catch (e: any) {
     error.value = e?.data?.message || 'Не удалось загрузить журнал заявок'
@@ -322,7 +345,9 @@ onMounted(load)
         </div>
       </div>
 
-      <div class="aj-count">{{ subTotal }} записей</div>
+      <div class="aj-count">
+        {{ subTotal }} записей · в архиве {{ archived }} фото ({{ archiveMb }} МБ)
+      </div>
 
       <div v-if="loading && !subs.length" class="aj-empty">Загрузка...</div>
       <div v-else-if="!subs.length" class="aj-empty">
@@ -341,8 +366,49 @@ onMounted(load)
               <span class="aj-when" :title="exact(s.ts)">{{ when(s.ts) }}</span>
             </div>
             <div class="aj-meta">
-              от {{ s.author || '?' }}<template v-if="s.admin"> · обработал(а) {{ s.admin }}</template><template v-if="s.photos"> · фото: {{ s.photos }}</template>
+              от {{ s.author || '?' }}<template v-if="s.admin"> · обработал(а) {{ s.admin }}</template><template v-if="s.photos"> · фото: {{ s.photos }}</template><template v-if="s.files?.length"> · <span class="aj-saved">в архиве {{ s.files.length }}</span></template>
             </div>
+
+            <div v-if="s.files?.length" class="aj-thumbs">
+              <a
+                v-for="(f, k) in s.files"
+                :key="f"
+                :href="fileUrl(f)"
+                target="_blank"
+                rel="noopener"
+                class="aj-thumb"
+                :title="'Открыть фото ' + (k + 1)"
+              >
+                <img :src="fileUrl(f)" :alt="'Фото ' + (k + 1)" loading="lazy">
+              </a>
+            </div>
+
+            <div v-if="s.text || s.aiText" class="aj-textwrap">
+              <button class="aj-toggle" @click="toggle(s.ts + i)">
+                {{ opened.has(s.ts + i) ? 'Скрыть текст' : 'Показать полный текст' }}
+              </button>
+              <div v-if="opened.has(s.ts + i)" class="aj-texts">
+                <div v-if="s.text" class="aj-textblock">
+                  <div class="aj-textlabel">
+                    Как прислал автор
+                    <button class="aj-copy" @click="copyText(s.text!)">копировать</button>
+                  </div>
+                  <pre>{{ s.text }}</pre>
+                </div>
+                <div v-if="s.aiText" class="aj-textblock">
+                  <div class="aj-textlabel">
+                    Текст для канала
+                    <button class="aj-copy" @click="copyText(s.aiText!)">копировать</button>
+                  </div>
+                  <pre>{{ s.aiText }}</pre>
+                </div>
+                <div v-if="s.photoUrls?.length" class="aj-urls">
+                  Исходные ссылки MAX:
+                  <a v-for="(u, k) in s.photoUrls" :key="u" :href="u" target="_blank" rel="noopener">{{ k + 1 }}</a>
+                </div>
+              </div>
+            </div>
+
             <div v-if="s.error" class="aj-note warn">{{ s.error }}</div>
           </div>
         </div>
@@ -435,4 +501,19 @@ onMounted(load)
 .aj-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; font-size: 13px; color: var(--text-secondary); }
 .aj-pg { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); cursor: pointer; color: var(--text); }
 .aj-pg:disabled { opacity: .4; cursor: default; }
+
+/* Архив заявок */
+.aj-saved { color: #2e7d32; font-weight: 600; }
+.aj-thumbs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.aj-thumb { width: 74px; height: 74px; border-radius: 9px; overflow: hidden; border: 1px solid var(--border); display: block; }
+.aj-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.aj-textwrap { margin-top: 8px; }
+.aj-toggle { border: none; background: none; padding: 0; font-size: 12px; font-weight: 600; color: var(--primary); cursor: pointer; text-decoration: underline; }
+.aj-texts { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
+.aj-textblock { background: var(--bg-alt); border-radius: 10px; padding: 10px 12px; }
+.aj-textlabel { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); margin-bottom: 6px; }
+.aj-copy { border: none; background: none; font-size: 11px; color: var(--primary); cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 600; }
+.aj-textblock pre { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.aj-urls { font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.aj-urls a { color: var(--primary); }
 </style>
