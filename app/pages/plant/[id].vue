@@ -64,6 +64,17 @@ async function saveMaxText() {
 
 const plantId = computed(() => parseInt(String(route.params.id)))
 const plant = computed(() => catalog.getPlantById(plantId.value))
+
+// Склеенные дубли: старый адрес уводим на карточку, в которую его влили,
+// иначе ссылки из поиска и избранного упираются в «Растение не найдено»
+watch([() => catalog.isLoaded, plant], async ([isLoaded, found]) => {
+  if (!isLoaded || found || !plantId.value) return
+  try {
+    const merges = await $fetch<Record<string, number>>('/data/plant-merges.json')
+    const target = merges?.[String(plantId.value)]
+    if (target) await navigateTo(`/plant/${target}`, { redirectCode: 301, replace: true })
+  } catch {}
+}, { immediate: true })
 const relatedPlants = computed(() => plant.value ? catalog.getRelatedPlants(plant.value) : [])
 const sameCultivarPlants = computed(() => plant.value ? catalog.getSameCultivarPlants(plant.value) : [])
 

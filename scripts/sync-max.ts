@@ -15,6 +15,7 @@ import { resolve } from 'path'
 import { execSync } from 'child_process'
 import { copyFileSync } from 'fs'
 import { archiveOldPhotos } from './lib/growth-archive.js'
+import { cultKey, regionsClash } from './lib/plant-key.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const RAW_DIR = resolve(ROOT, 'data/raw')
@@ -282,20 +283,6 @@ async function main() {
     return `${norm}|||${gardenNorm}`
   }
 
-  // Ключ по сорту: первую строку поста автор переписывает (добавляет регион,
-  // меняет кавычки), и карточка переставала узнаваться — отсюда вторые карточки.
-  // Род + вид + сорт + сад устойчивы к такой правке.
-  function cultKey(p: any): string {
-    const cult = (p.cultivar || '')
-      .replace(/[‘’“”''""'"`]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase()
-    if (!cult) return ''  // без сорта слишком грубо — можно слить разные экземпляры
-    const gardenNorm = (p.garden || '').replace(/\s+/g, '').toLowerCase()
-    return `${(p.genus || '').toLowerCase()}|${(p.species || '').toLowerCase()}|${cult}|||${gardenNorm}`
-  }
-
   // Build lookup by normalized latin_full + garden AND by max_url
   const byKey = new Map<string, any>()
   const byUrl = new Map<string, any>()
@@ -356,15 +343,6 @@ async function main() {
     const expected = 1 + (p.species ? 1 : 0)
       + String(p.cultivar || '').trim().split(/\s+/).filter(Boolean).length
     return words <= expected
-  }
-
-  // Разные регионы — разные растения, даже если сорт совпал
-  function regionsClash(a: string, b: string): boolean {
-    const x = (a || '').trim().toLowerCase()
-    const y = (b || '').trim().toLowerCase()
-    if (!x || !y) return false
-    const head = (s: string) => s.split(',')[0].trim()
-    return !x.includes(head(y)) && !y.includes(head(x))
   }
 
   // Повторный пост того же растения — обновляем карточку, а не плодим вторую

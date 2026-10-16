@@ -90,6 +90,7 @@ export async function archiveOldPhotos(
   plant: ArchivablePlant,
   oldPhotos: string[] | undefined,
   newPhotos: string[],
+  opts: { year?: number; comment?: string } = {},
 ): Promise<number> {
   const plantId = plant._site_id
   if (!plantId) return 0  // карточка ещё не получила site id — архивировать некуда
@@ -109,7 +110,12 @@ export async function archiveOldPhotos(
   const seenUrls = new Set(mine.filter((e: any) => e.source).map((e: any) => String(e.source)))
   const seenHashes = new Set(mine.filter((e: any) => e.sourceHash).map((e: any) => String(e.sourceHash)))
 
-  const year = guessYear(plant)
+  // Год съёмки: подсказка вызывающего (год того поста, откуда фото) — точнее,
+  // чем время текущего поста карточки
+  const year = opts.year && opts.year >= 1990 && opts.year <= new Date().getFullYear()
+    ? opts.year
+    : guessYear(plant)
+  const comment = opts.comment ?? 'Фото из прежней версии карточки'
   let added = 0
 
   for (const source of sources) {
@@ -129,7 +135,7 @@ export async function archiveOldPhotos(
       year,
       photoFilename,
       authorContact: 'archive',
-      comment: 'Фото из прежней версии карточки',
+      comment,
       createdAt: new Date().toISOString(),
       source,
       sourceHash: hash,
