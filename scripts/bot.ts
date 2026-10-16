@@ -16,6 +16,7 @@ import { createServer } from 'http'
 import { resolve } from 'path'
 import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden, loadPublications, removePublication } from './lib/dupe-check.js'
 import { logSubmission, findStuck, archivePhotos } from './lib/submission-log.js'
+import { scheduleSync } from './lib/trigger-sync.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const STATE_FILE = resolve(ROOT, 'data/bot-state.json')
@@ -52,7 +53,9 @@ if (String(ADMIN_CHAT_ID) === PROTECTED_CATALOG_ID) {
 interface BotState {
   consented: Record<string, boolean>
   banned: Record<string, boolean>
-  midMap: Record<string, { userId: number; chatId: number; userName: string; photos?: string[] }>
+  midMap: Record<string, { userId: number; chatId: number; userName: string; photos?: string[]; origText?: string }>
+  // Фото прислали без описания: ждём текст следующим сообщением (uid → заявка)
+  awaitingText: Record<string, { mid: string; at: number }>
   // Pending publication: admin accepted, waiting for edited text to post to catalog channel
   pendingPublish: Record<string, { photos: string[]; userName: string; aiText?: string }>
   // Pending edit: admin wants to edit a post in catalog channel
@@ -65,10 +68,10 @@ function loadState(): BotState {
   if (existsSync(STATE_FILE)) {
     try {
       const s = JSON.parse(readFileSync(STATE_FILE, 'utf-8'))
-      return { consented: s.consented || {}, banned: s.banned || {}, midMap: s.midMap || {}, pendingPublish: s.pendingPublish || {}, pendingEdit: s.pendingEdit || {}, gardenOwners: s.gardenOwners || {} }
+      return { consented: s.consented || {}, banned: s.banned || {}, midMap: s.midMap || {}, pendingPublish: s.pendingPublish || {}, pendingEdit: s.pendingEdit || {}, gardenOwners: s.gardenOwners || {}, awaitingText: s.awaitingText || {} }
     } catch {}
   }
-  return { consented: {}, banned: {}, midMap: {}, pendingPublish: {}, pendingEdit: {}, gardenOwners: {} }
+  return { consented: {}, banned: {}, midMap: {}, pendingPublish: {}, pendingEdit: {}, gardenOwners: {}, awaitingText: {} }
 }
 
 function saveState(s: BotState) {
@@ -495,6 +498,8 @@ async function processTgAdminReply(replyMid: string, text: string, adminName: st
 
     delete tgState.pendingPublish[replyMid]
     saveTgState(tgState)
+    // Карточка должна появиться на сайте сейчас, а не после ночного синка
+    scheduleSync(`[TG] ${firstLine}`, log)
     log(`[TG] Published to channel: ${publishText.substring(0, 50)} (from ${tgPending.userName})`)
     return
   }
@@ -916,8 +921,10 @@ async function process(update: any) {
       const userMsg = `✅ Ваше фото принято! Спасибо за вклад в каталог «Территория хвойных».${NEXT_STEP}`
       await send(target.chatId, userMsg)
 
-      // Get original message text from the forwarded message (via reply chain)
-      const origText = msg.link?.message?.text || msg.link?.message?.body?.text || ''
+      // Текст автора: сначала сохранённый ботом (описание могло прийти вторым
+      // сообщением), иначе — из пересланного сообщения
+      const origText = (target as any).origText
+        || msg.link?.message?.text || msg.link?.message?.body?.text || ''
       log(`  origText for dupe check: "${origText.substring(0, 80)}..."`)
 
       // AI formatting
@@ -1049,6 +1056,8 @@ async function process(update: any) {
 
       delete state.pendingPublish[replyMid]
       saveState(state)
+      // Карточка должна появиться на сайте сейчас, а не после ночного синка
+      scheduleSync(firstLine, log)
       log(`Published to channel: ${publishText.substring(0, 50)} (${pending.photos.length} photos, from ${pending.userName})`)
       return
     }
@@ -1138,14 +1147,54 @@ async function process(update: any) {
     if (att.type === 'image' && att.payload?.url) photos.push(att.payload.url)
   }
 
+  // Описание пришло отдельным сообщением — подклеиваем его к фото-заявке,
+  // чтобы админам не пришлось сводить два сообщения руками.
+  const pendingDesc = state.awaitingText[String(uid)]
+  if (!photos.length && text.trim() && pendingDesc && Date.now() - pendingDesc.at < 24 * 3600_000) {
+    const slot = state.midMap[pendingDesc.mid]
+    const slotPhotos = slot?.photos || []
+    if (slot && slotPhotos.length) {
+      slot.origText = text
+      delete state.awaitingText[String(uid)]
+      saveState(state)
+
+      const userTagD = username ? `@${username}` : ''
+      const edited = `${text}\n\n👤 ${name}, ${userTagD} (#ID${uid})` +
+        `\n\n📌 Описание дослано автором. Ответьте на ЭТО сообщение:\n  +  принять (фото возьмутся отсюда, текст обработает ИИ)\n  −  отклонить\n  текст — написать пользователю`
+      const attach = slotPhotos.map(url => ({ type: 'image', payload: { url } }))
+      const editOk = await editMessage(pendingDesc.mid, ADMIN_CHAT_ID, edited, attach)
+      if (!editOk) {
+        // Правка не прошла — не теряем описание, присылаем его отдельным сообщением
+        await send(ADMIN_CHAT_ID, `📝 Описание к заявке от ${name}:\n\n${text}\n\nОтветьте + на сообщение с фото выше.`)
+      }
+
+      await send(chatId, '✅ Описание добавил к вашей заявке. Администраторы рассмотрят и ответят здесь.')
+      logSubmission({
+        stage: 'received', source: 'max', author: name,
+        latin: text.split('\n')[0]?.slice(0, 80),
+        text, photos: slotPhotos.length, photoUrls: slotPhotos, srcMid: pendingDesc.mid,
+      })
+      log(`Описание дослано: ${name} → заявка ${pendingDesc.mid}`)
+      return
+    }
+    delete state.awaitingText[String(uid)]
+  }
+
+  // Фото без единой строчки текста: опубликовать такое нельзя — ни названия,
+  // ни локации, ни сада. Заявку всё равно пересылаем (фото терять нельзя),
+  // но помечаем её и сразу просим у автора описание.
+  const noDescription = photos.length > 0 && !text.trim()
+
   const userTag = username ? `@${username}` : ''
-  let adminText = text || ''
+  let adminText = noDescription ? '⚠️ Заявка без описания' : (text || '')
   adminText += `\n\n👤 ${name}, ${userTag} (#ID${uid})`
 
   const attachments: any[] = photos.map(url => ({ type: 'image', payload: { url } }))
 
   // Add admin instructions to forwarded message
-  if (photos.length > 0) {
+  if (noDescription) {
+    adminText += `\n\n📌 Автор прислал только фото. Бот уже попросил у него описание — дождитесь текста и тогда отвечайте + на ЭТО сообщение.\n  −  отклонить\n  текст — написать пользователю`
+  } else if (photos.length > 0) {
     adminText += `\n\n📌 Ответьте на ЭТО сообщение:\n  +  принять (фото возьмутся отсюда, текст обработает ИИ)\n  −  отклонить\n  текст — написать пользователю`
   } else {
     adminText += `\n\n💬 Это текстовое сообщение (без фото). Для принятия заявки ответьте + на сообщение с фото.`
@@ -1154,12 +1203,25 @@ async function process(update: any) {
   const result: any = await send(ADMIN_CHAT_ID, adminText, attachments.length ? attachments : undefined)
   const mid = result?.message?.body?.mid
   if (mid) {
-    state.midMap[mid] = { userId: uid, chatId, userName: name, photos }
+    state.midMap[mid] = { userId: uid, chatId, userName: name, photos, origText: text || undefined }
+    if (noDescription) state.awaitingText[String(uid)] = { mid, at: Date.now() }
+    else delete state.awaitingText[String(uid)]
     saveState(state)
   }
 
   // Confirm to user
-  if (photos.length > 0) {
+  if (noDescription) {
+    await send(chatId,
+      '📷 Фото получил, но без описания опубликовать растение не получится.\n\n' +
+      'Пришлите, пожалуйста, ответным сообщением:\n' +
+      '— Латинское название с сортом, например Pinus mugo \'Varella\'\n' +
+      '— Русское название\n' +
+      '— Локация (город, область)\n' +
+      '— Возраст\n' +
+      '— Размер\n' +
+      '— Название сада\n\n' +
+      'Можно одним текстом — остальное бот разберёт сам.')
+  } else if (photos.length > 0) {
     await send(chatId, '📋 Заявка получена! Администраторы рассмотрят и ответят вам здесь.')
   }
 
@@ -1169,7 +1231,7 @@ async function process(update: any) {
   const files = await archivePhotos(subId, photos)
   logSubmission({
     stage: 'received', source: 'max', author: name,
-    latin: text.split('\n')[0]?.slice(0, 80),
+    latin: noDescription ? '⚠️ без описания' : text.split('\n')[0]?.slice(0, 80),
     text, photos: photos.length, photoUrls: photos, files, srcMid: mid,
   })
   log(`Forwarded from ${name}: ${photos.length} photos (${files.length} архивировано), ${text.substring(0, 40)}`)
