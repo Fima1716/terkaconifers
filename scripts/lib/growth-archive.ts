@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import { resolve } from 'path'
+import { resolve, basename } from 'path'
 import { createHash } from 'crypto'
 
 /**
@@ -16,6 +16,27 @@ const ROOT = resolve(import.meta.dirname, '../..')
 const DATA_PATH = resolve(ROOT, 'data/growth-diary.json')
 const UPLOAD_DIR = resolve(ROOT, 'data/uploads/growth')
 const PUBLIC_DIR = resolve(ROOT, 'public')
+
+/**
+ * Где лежат файлы каталога из путей вида `photos/...`. На проде это не
+ * public/photos, а отдельная папка под nginx-алиасом, поэтому адрес берём
+ * из PHOTOS_DIR (.env), а public/photos остаётся запасным вариантом.
+ */
+function photoDirs(): string[] {
+  const dirs: string[] = []
+  let fromEnv = process.env.PHOTOS_DIR || ''
+  if (!fromEnv) {
+    try {
+      for (const line of readFileSync(resolve(ROOT, '.env'), 'utf-8').split('\n')) {
+        const m = line.match(/^\s*PHOTOS_DIR\s*=\s*(.*)$/)
+        if (m) { fromEnv = m[1].trim(); break }
+      }
+    } catch { /* .env может не быть */ }
+  }
+  if (fromEnv) dirs.push(resolve(fromEnv))
+  dirs.push(resolve(PUBLIC_DIR, 'photos'))
+  return dirs
+}
 
 /** Сколько снимков одного поста уносим в историю (остальные — шум в ленте) */
 const MAX_PER_POST = 4
@@ -74,7 +95,17 @@ async function readPhoto(source: string): Promise<Buffer | null> {
       if (!resp.ok) return null
       return Buffer.from(await resp.arrayBuffer())
     }
-    const local = resolve(PUBLIC_DIR, source.replace(/^\/+/, ''))
+    const rel = source.replace(/^\/+/, '')
+    // `photos/имя.jpg` → ищем имя файла в папках с фотографиями каталога
+    if (rel.startsWith('photos/')) {
+      const name = basename(rel)
+      for (const dir of photoDirs()) {
+        const file = resolve(dir, name)
+        if (file.startsWith(dir) && existsSync(file)) return readFileSync(file)
+      }
+      return null
+    }
+    const local = resolve(PUBLIC_DIR, rel)
     if (!local.startsWith(PUBLIC_DIR) || !existsSync(local)) return null
     return readFileSync(local)
   } catch {
