@@ -9,7 +9,7 @@ function loadGardens() {
 }
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const body = await readBody(event)
 
@@ -22,6 +22,11 @@ export default defineEventHandler(async (event) => {
       data.gardens[gardenId].consentAt = new Date().toISOString()
     }
     writeFileSync(GARDENS_PATH, JSON.stringify(data, null, 2))
+    const names = Object.keys(body.consents)
+    logFor(event, user, 'consent.update', {
+      title: names.length > 3 ? `${names.length} садов` : names.join(', '),
+      note: names.slice(0, 20).join(', '),
+    })
     return { ok: true }
   }
 
@@ -37,5 +42,10 @@ export default defineEventHandler(async (event) => {
   data.gardens[gardenId].consentAt = new Date().toISOString()
 
   writeFileSync(GARDENS_PATH, JSON.stringify(data, null, 2))
+  logFor(event, user, 'consent.update', {
+    targetId: gardenId,
+    title: gardenId,
+    changes: [{ field: 'consent', to: consent ? 'да' : 'нет' }],
+  })
   return { ok: true }
 })

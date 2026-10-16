@@ -41,6 +41,16 @@ const ACTION_LABELS: Record<string, string> = {
   'user.create': 'Создан аккаунт',
   'user.update': 'Изменён аккаунт',
   'user.delete': 'Удалён аккаунт',
+  'diary.add': 'Фото в дневник',
+  'diary.delete': 'Удалено фото дневника',
+  'banner.update': 'Баннер',
+  'settings.update': 'Настройки сайта',
+  'conditions.update': 'Условия выращивания',
+  'team.update': 'Команда',
+  'consent.update': 'Согласие сада',
+  'maintenance.update': 'Режим обслуживания',
+  'sync.run': 'Запуск синхронизации',
+  'enrich.run': 'Пересборка каталога',
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -57,6 +67,16 @@ const FIELD_LABELS: Record<string, string> = {
   originator: 'Оригинатор',
   is_russian: 'Российский сорт',
   photos: 'Фото',
+  year: 'Год съёмки',
+  role: 'Роль',
+  displayName: 'Имя',
+  gardens: 'Сады',
+  password: 'Пароль',
+  consent: 'Согласие',
+  buyLink: 'Ссылка «Купить»',
+  enabled: 'Включено',
+  showBuyButtons: 'Кнопки «Купить»',
+  showBuyButtonsGarden: 'Кнопки «Купить» в садах',
 }
 
 const STAGE_LABELS: Record<string, string> = {

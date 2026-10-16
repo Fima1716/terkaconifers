@@ -9,7 +9,7 @@ function saveProgress(data: any) {
 }
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const body = await readBody(event)
   const token = body?.token || process.env.MAX_BOT_TOKEN || ''
@@ -19,6 +19,7 @@ export default defineEventHandler(async (event) => {
 
   // Init progress
   saveProgress({ status: 'running', percent: 0, message: 'Запуск...', started: Date.now(), lines: [] })
+  logFor(event, user, 'sync.run', { note: 'ручной запуск из админки' })
 
   const cwd = resolve(process.cwd())
   const lines: string[] = []

@@ -1,5 +1,5 @@
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const currentUser = await requireAuth(event, 'super_admin')
 
   const { username, password, displayName, role, gardens } = await readBody(event)
 
@@ -32,6 +32,11 @@ export default defineEventHandler(async (event) => {
 
   users.push(user)
   saveUsers(users)
+  logFor(event, currentUser, 'user.create', {
+    targetId: username,
+    title: user.displayName || username,
+    changes: [{ field: 'role', to: user.role }],
+  })
 
   return { user: toPublic(user) }
 })

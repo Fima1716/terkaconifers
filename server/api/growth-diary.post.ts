@@ -79,6 +79,17 @@ export default defineEventHandler(async (event) => {
   data.nextId++
   writeFileSync(DATA_PATH, JSON.stringify(data, null, 2))
 
+  // В журнал админки: кто добавил фото в историю роста
+  logAction({
+    user: access.isAdmin ? access.storageKey : `сад: ${access.garden}`,
+    role: access.isAdmin ? 'super_admin' : 'owner',
+    action: 'diary.add',
+    targetId: plantId,
+    changes: [{ field: 'year', to: String(year) }],
+    note: comment || undefined,
+    ip: getRequestIP(event, { xForwardedFor: true }) || undefined,
+  })
+
   lastPost.set(ip, now)
   return { ok: true, entry }
 })

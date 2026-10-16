@@ -36,6 +36,16 @@ export const ACTION_LABELS: Record<string, string> = {
   'user.create': 'Создан пользователь',
   'user.update': 'Изменён пользователь',
   'user.delete': 'Удалён пользователь',
+  'diary.add': 'Фото в дневник роста',
+  'diary.delete': 'Удаление фото из дневника',
+  'banner.update': 'Правка баннера',
+  'settings.update': 'Настройки сайта',
+  'conditions.update': 'Правка условий выращивания',
+  'team.update': 'Правка команды',
+  'consent.update': 'Согласие сада',
+  'maintenance.update': 'Режим обслуживания',
+  'sync.run': 'Запуск синхронизации',
+  'enrich.run': 'Пересборка каталога',
 }
 
 function load(): ActionEntry[] {

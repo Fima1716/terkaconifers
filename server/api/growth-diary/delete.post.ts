@@ -5,7 +5,7 @@ const DATA_PATH = resolve(process.cwd(), 'data/growth-diary.json')
 const UPLOAD_DIR = resolve(process.cwd(), 'data/uploads/growth')
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const body = await readBody(event)
   const id = parseInt(body.id)
@@ -22,6 +22,11 @@ export default defineEventHandler(async (event) => {
 
   data.entries = (data.entries || []).filter((e: any) => e.id !== id)
   writeFileSync(DATA_PATH, JSON.stringify(data, null, 2))
+
+  logFor(event, user, 'diary.delete', {
+    targetId: entry?.plantId ?? id,
+    changes: entry?.year ? [{ field: 'year', from: String(entry.year) }] : undefined,
+  })
 
   return { ok: true }
 })

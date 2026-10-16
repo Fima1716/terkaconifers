@@ -22,5 +22,11 @@ export default defineEventHandler(async (event) => {
   }
 
   writeFileSync(path, JSON.stringify(data, null, 2))
+  logFor(event, user, 'settings.update', {
+    changes: [
+      { field: 'showBuyButtons', to: String(data.showBuyButtons ?? false) },
+      { field: 'showBuyButtonsGarden', to: String(data.showBuyButtonsGarden ?? false) },
+    ],
+  })
   return { ok: true, showBuyButtons: data.showBuyButtons ?? false, showBuyButtonsGarden: data.showBuyButtonsGarden ?? false }
 })

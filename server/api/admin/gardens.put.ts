@@ -18,6 +18,7 @@ export default defineEventHandler(async (event) => {
     try { data = JSON.parse(readFileSync(path, 'utf-8')) } catch {}
   }
 
+  const before = { ...(data.gardens[gardenId] || {}) }
   data.gardens[gardenId] = {
     ...data.gardens[gardenId],
     ...profile,
@@ -25,5 +26,10 @@ export default defineEventHandler(async (event) => {
   }
 
   writeFileSync(path, JSON.stringify(data, null, 2))
+  logFor(event, user, 'garden.update', {
+    targetId: gardenId,
+    title: gardenId,
+    changes: diffFields(before, profile, Object.keys(profile || {})),
+  })
   return { ok: true }
 })

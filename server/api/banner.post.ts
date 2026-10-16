@@ -5,7 +5,7 @@ import { resolve } from 'path'
 const BANNER_DIR = resolve(process.cwd(), 'data/banner')
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const formData = await readMultipartFormData(event)
   if (!formData) throw createError({ statusCode: 400, message: 'Нет данных' })
@@ -114,5 +114,6 @@ export default defineEventHandler(async (event) => {
   if (action === 'updateSettings') { config.enabled = fields.enabled === 'true'; config.interval = parseInt(fields.interval || '6000') }
 
   writeFileSync(configPath, JSON.stringify(config, null, 2))
+  logFor(event, user, 'banner.update', { note: String(action || '') })
   return { ok: true, config }
 })

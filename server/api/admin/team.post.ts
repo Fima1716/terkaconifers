@@ -29,7 +29,7 @@ function saveTeam(data: { members: TeamMember[] }) {
 }
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const formData = await readMultipartFormData(event)
   if (!formData) throw createError({ statusCode: 400, message: 'Нет данных' })
@@ -109,5 +109,6 @@ export default defineEventHandler(async (event) => {
   }
 
   saveTeam(team)
+  logFor(event, user, 'team.update', { note: String(fields.action || '') })
   return { ok: true, members: team.members }
 })

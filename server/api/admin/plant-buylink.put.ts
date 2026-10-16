@@ -24,5 +24,9 @@ export default defineEventHandler(async (event) => {
   }
 
   writeFileSync(path, JSON.stringify(data, null, 2))
+  logFor(event, user, 'buylink.update', {
+    targetId: plantId,
+    changes: [{ field: 'buyLink', to: buyLink ? String(buyLink).slice(0, 200) : 'убрана' }],
+  })
   return { ok: true }
 })

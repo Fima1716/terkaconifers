@@ -5,7 +5,7 @@ import { resolve } from 'path'
 const BANNER_DIR = resolve(process.cwd(), 'data/banner')
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const formData = await readMultipartFormData(event)
   if (!formData) throw createError({ statusCode: 400, message: 'No data' })
@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
       const ext = field.filename.split('.').pop() || 'png'
       const name = `el-${Date.now()}.${ext}`
       writeFileSync(resolve(BANNER_DIR, name), field.data)
+      logFor(event, user, 'banner.update', { note: `загружен файл ${name}` })
       return { ok: true, filename: name }
     }
   }

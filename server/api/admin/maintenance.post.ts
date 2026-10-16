@@ -9,7 +9,7 @@ function load() {
 }
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const body = await readBody(event)
   const current = load()
@@ -18,5 +18,9 @@ export default defineEventHandler(async (event) => {
   if (typeof body.message === 'string') current.message = body.message
 
   writeFileSync(FILE, JSON.stringify(current, null, 2))
+  logFor(event, user, 'maintenance.update', {
+    changes: [{ field: 'enabled', to: current.enabled ? 'включён' : 'выключен' }],
+    note: current.message || undefined,
+  })
   return current
 })

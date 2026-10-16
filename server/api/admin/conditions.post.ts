@@ -37,7 +37,7 @@ function saveData(data: ConditionsData) {
 }
 
 export default defineEventHandler(async (event) => {
-  await requireAuth(event, 'super_admin')
+  const user = await requireAuth(event, 'super_admin')
 
   const body = await readBody(event)
   if (!body || !body.action) {
@@ -71,5 +71,9 @@ export default defineEventHandler(async (event) => {
   }
 
   saveData(data)
+  logFor(event, user, 'conditions.update', {
+    title: body.speciesFull || body.plantId || undefined,
+    note: String(body.action || ''),
+  })
   return { ok: true, data }
 })
