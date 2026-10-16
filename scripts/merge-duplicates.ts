@@ -194,11 +194,13 @@ async function main() {
   // Пересборка витрины
   console.log('🔧 Пересобираем каталог...')
   execSync('npx tsx scripts/enrich.ts', { cwd: ROOT, stdio: 'inherit' })
-  const publicData = resolve(ROOT, 'public/data')
-  if (!existsSync(publicData)) mkdirSync(publicData, { recursive: true })
-  copyFileSync(resolve(DATA, 'catalog-enriched.json'), resolve(publicData, 'catalog-enriched.json'))
-  copyFileSync(resolve(DATA, 'filters-enriched.json'), resolve(publicData, 'filters-enriched.json'))
-  copyFileSync(mergesPath, resolve(publicData, 'plant-merges.json'))
+  // Карта склеек нужна и в public/data, и в .output/public/data — как и каталог,
+  // иначе собранный сайт отдаёт старый файл (enrich.ts синхронизирует так же)
+  for (const dir of ['public/data', '.output/public/data']) {
+    const target = resolve(ROOT, dir)
+    if (!existsSync(target)) mkdirSync(target, { recursive: true })
+    copyFileSync(mergesPath, resolve(target, 'plant-merges.json'))
+  }
   console.log('✅ Готово')
 }
 
