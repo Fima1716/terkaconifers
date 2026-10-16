@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync } fr
 import { resolve } from 'path'
 import { execSync } from 'child_process'
 import { copyFileSync } from 'fs'
+import { archiveOldPhotos } from './lib/growth-archive.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const RAW_DIR = resolve(ROOT, 'data/raw')
@@ -281,12 +282,29 @@ async function main() {
     return `${norm}|||${gardenNorm}`
   }
 
+  // Ключ по сорту: первую строку поста автор переписывает (добавляет регион,
+  // меняет кавычки), и карточка переставала узнаваться — отсюда вторые карточки.
+  // Род + вид + сорт + сад устойчивы к такой правке.
+  function cultKey(p: any): string {
+    const cult = (p.cultivar || '')
+      .replace(/[‘’“”''""'"`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+    if (!cult) return ''  // без сорта слишком грубо — можно слить разные экземпляры
+    const gardenNorm = (p.garden || '').replace(/\s+/g, '').toLowerCase()
+    return `${(p.genus || '').toLowerCase()}|${(p.species || '').toLowerCase()}|${cult}|||${gardenNorm}`
+  }
+
   // Build lookup by normalized latin_full + garden AND by max_url
   const byKey = new Map<string, any>()
   const byUrl = new Map<string, any>()
+  const byCult = new Map<string, any>()
   for (const p of catalog) {
     byKey.set(normKey(p.latin_full, p.garden), p)
     if (p.max_url) byUrl.set(p.max_url, p)
+    const ck = cultKey(p)
+    if (ck && !byCult.has(ck)) byCult.set(ck, p)
   }
   let nextId = Math.max(0, ...catalog.map((p: any) => p.id)) + 1
 
@@ -312,6 +330,84 @@ async function main() {
   // Parse, add new & update changed plants
   let added = 0
   let updated = 0
+  let archived = 0
+
+  // Старое фото не должно пропадать бесследно: перед заменой уносим его
+  // в «Дневник роста» — так у карточки копится история, а не теряется прошлое.
+  async function archiveReplaced(entry: any, newPhotos: string[]) {
+    try {
+      const n = await archiveOldPhotos(entry, entry.photos, newPhotos)
+      if (n > 0) {
+        archived += n
+        log(`  📅 В дневник роста: ${n} фото (${entry.latin_full})`)
+      }
+    } catch (err) {
+      log(`  ⚠ Не удалось сохранить прежнее фото (${entry.latin_full}): ${err}`)
+    }
+  }
+
+  // Первая строка — только «Род вид 'Сорт'», без дописанного города и прочего
+  function isCleanLatin(p: any): boolean {
+    const words = String(p.latin_full || '')
+      .replace(/[‘’“”''""'"`]/g, ' ')
+      .trim().split(/\s+/)
+      .filter(w => w && !/^[×хx]$/.test(w))  // маркер гибрида словом не считаем
+      .length
+    const expected = 1 + (p.species ? 1 : 0)
+      + String(p.cultivar || '').trim().split(/\s+/).filter(Boolean).length
+    return words <= expected
+  }
+
+  // Разные регионы — разные растения, даже если сорт совпал
+  function regionsClash(a: string, b: string): boolean {
+    const x = (a || '').trim().toLowerCase()
+    const y = (b || '').trim().toLowerCase()
+    if (!x || !y) return false
+    const head = (s: string) => s.split(',')[0].trim()
+    return !x.includes(head(y)) && !y.includes(head(x))
+  }
+
+  // Повторный пост того же растения — обновляем карточку, а не плодим вторую
+  async function adoptNewerPost(
+    entry: any, plant: any, photos: string[], msgUrl: string, msgMid: string, msgTs: number,
+  ) {
+    const oldKey = normKey(entry.latin_full, entry.garden)
+    const oldCult = cultKey(entry)
+    if (photos.length > 0) {
+      await archiveReplaced(entry, photos)
+      entry.photos = photos
+      entry.thumbs = photos
+    }
+    entry.max_url = msgUrl
+    entry._mid = msgMid
+    entry._msg_ts = msgTs
+    if (plant.region) entry.region = plant.region
+    if (plant.age) entry.age = plant.age
+    if (plant.size) entry.size = plant.size
+    if (plant.originator) entry.originator = plant.originator
+    if (plant.name_ru) entry.name_ru = plant.name_ru
+    if (plant.garden && !entry.garden) entry.garden = plant.garden
+    if (plant.hashtags?.length) entry.hashtags = plant.hashtags
+    entry.is_russian = plant.is_russian
+    // Первая строка поста могла стать точнее — подтягиваем её вместе с сортом.
+    // Но если в новой строке лишние слова (дописали город), а в старой их нет —
+    // оставляем прежнее название, иначе в заголовке карточки заводится мусор.
+    const noisierNow = !isCleanLatin(plant) && isCleanLatin(entry)
+    if (plant.latin_full && plant.latin_full !== entry.latin_full && !noisierNow) {
+      entry.latin_full = plant.latin_full
+      if (plant.cultivar) entry.cultivar = plant.cultivar
+      if (plant.species) entry.species = plant.species
+    }
+    if (msgUrl) byUrl.set(msgUrl, entry)
+    const newKey = normKey(entry.latin_full, entry.garden)
+    if (newKey !== oldKey) { byKey.delete(oldKey); byKey.set(newKey, entry) }
+    const newCult = cultKey(entry)
+    if (newCult !== oldCult) {
+      if (oldCult) byCult.delete(oldCult)
+      if (newCult && !byCult.has(newCult)) byCult.set(newCult, entry)
+    }
+    updated++
+  }
   for (const msg of messages) {
     const body = msg.body || {}
     const text: string = body.text || ''
@@ -343,6 +439,17 @@ async function main() {
       // Backfill _mid and timestamp if missing
       if (msgMid && !existingByUrl._mid) { existingByUrl._mid = msgMid }
       if (msg.timestamp && !existingByUrl._msg_ts) { existingByUrl._msg_ts = msg.timestamp }
+      // Карточка могла уже переехать на более свежий пост этого же растения —
+      // тогда старый пост только дополняет пустые поля, но ничего не затирает.
+      const stale = existingByUrl.max_url && existingByUrl.max_url !== msgUrl
+        && existingByUrl._msg_ts && msg.timestamp && msg.timestamp < existingByUrl._msg_ts
+      if (stale) {
+        if (!existingByUrl.size && plant.size) existingByUrl.size = plant.size
+        if (!existingByUrl.age && plant.age) existingByUrl.age = plant.age
+        if (!existingByUrl.region && plant.region) existingByUrl.region = plant.region
+        if (!existingByUrl.originator && plant.originator) existingByUrl.originator = plant.originator
+        continue
+      }
       // Compare key fields for changes
       let changed = false
       if (existingByUrl.region !== plant.region && plant.region) { existingByUrl.region = plant.region; changed = true }
@@ -350,7 +457,11 @@ async function main() {
       if (!existingByUrl.size && plant.size) { existingByUrl.size = plant.size; changed = true }
       if (!existingByUrl.originator && plant.originator) { existingByUrl.originator = plant.originator; changed = true }
       if (existingByUrl.name_ru !== plant.name_ru && plant.name_ru) { existingByUrl.name_ru = plant.name_ru; changed = true }
-      if (existingByUrl.latin_full !== plant.latin_full) { existingByUrl.latin_full = plant.latin_full; changed = true }
+      // Лишние слова в латинской строке (дописали город) заголовок не портят
+      if (existingByUrl.latin_full !== plant.latin_full
+          && !(!isCleanLatin(plant) && isCleanLatin(existingByUrl))) {
+        existingByUrl.latin_full = plant.latin_full; changed = true
+      }
       if (plant.is_russian !== existingByUrl.is_russian) { existingByUrl.is_russian = plant.is_russian; changed = true }
       if (JSON.stringify(plant.hashtags) !== JSON.stringify(existingByUrl.hashtags)) { existingByUrl.hashtags = plant.hashtags; changed = true }
       // Update garden if changed (post was edited or garden renamed hashtag)
@@ -368,7 +479,9 @@ async function main() {
       // 2. This message is not older than what's already stored (don't overwrite newer photos)
       const hasLocalPhotos = existingByUrl.photos?.some((p: string) => p.startsWith('photos/'))
       const isOlderThanStored = existingByUrl._msg_ts && msg.timestamp && msg.timestamp < existingByUrl._msg_ts
-      if (!hasLocalPhotos && !isOlderThanStored && photos.length > 0) {
+      const samePhotos = JSON.stringify(existingByUrl.photos) === JSON.stringify(photos)
+      if (!hasLocalPhotos && !isOlderThanStored && photos.length > 0 && !samePhotos) {
+        await archiveReplaced(existingByUrl, photos)
         existingByUrl.photos = photos; existingByUrl.thumbs = photos; changed = true
       }
       if (changed) { updated++; log(`  ~ Updated: ${existingByUrl.latin_full}`) }
@@ -386,18 +499,7 @@ async function main() {
 
       if (isDifferentPost && isNewer && photos.length > 0) {
         // Newer post of the same plant — update photos and metadata
-        existingByKey.photos = photos
-        existingByKey.thumbs = photos
-        existingByKey.max_url = msgUrl
-        existingByKey._mid = msgMid
-        existingByKey._msg_ts = msgTs
-        if (plant.region) existingByKey.region = plant.region
-        if (plant.age) existingByKey.age = plant.age
-        if (plant.size) existingByKey.size = plant.size
-        if (plant.originator) existingByKey.originator = plant.originator
-        if (plant.name_ru) existingByKey.name_ru = plant.name_ru
-        byUrl.set(msgUrl, existingByKey)
-        updated++
+        await adoptNewerPost(existingByKey, plant, photos, msgUrl, msgMid, msgTs)
         log(`  ♻ Updated with newer photos: ${existingByKey.latin_full} (${existingByKey.garden})`)
       } else {
         // Same or older post — backfill missing fields only
@@ -432,6 +534,26 @@ async function main() {
       // All existing have URLs — skip if exact garden matches or if no URL-less entries remain
       const hasExactGarden = allByLatin.some(([k]) => k === key)
       if (hasExactGarden) continue
+
+      // Сад указан не с обеих сторон — это та же самая карточка, у поста просто
+      // потерялся (или только появился) хэштег сада. Раньше здесь рождался дубль:
+      // автор перезаливал растение с описанием и получал вторую карточку.
+      const gardenless = allByLatin.filter(([, v]) => (!plant.garden || !v.garden) && !regionsClash(plant.region, v.region))
+      if (gardenless.length === 1) {
+        const twin = gardenless[0][1]
+        const msgTs = msg.timestamp || 0
+        if (msgTs > (twin._msg_ts || 0)) {
+          await adoptNewerPost(twin, plant, photos, msgUrl, msgMid, msgTs)
+          log(`  🧩 Перезалив без хэштега сада — обновил карточку: ${twin.latin_full} (${twin.garden || 'сад не указан'})`)
+        }
+        continue
+      }
+      // Хэштега сада нет, а подходящих карточек несколько — привязать не к чему.
+      // Новую карточку не плодим: пусть лучше пост разберут руками.
+      if (!plant.garden && gardenless.length > 1) {
+        log(`  ❓ Пост без хэштега сада, похожих карточек ${allByLatin.length}: ${plant.latin_full} — пропущен`)
+        continue
+      }
       // If there are existing entries with same latin AND same region AND same garden — likely same plant
       // Only skip if garden also matches (different gardens in same region = different plants)
       if (plant.region && plant.garden) {
@@ -443,9 +565,23 @@ async function main() {
       }
     }
 
+    // Та же пара «сорт + сад», но первая строка поста переписана (добавили
+    // регион, поменяли кавычки) — это не новое растение, а обновлённая карточка.
+    const ck = cultKey(plant)
+    const twinByCult = ck ? byCult.get(ck) : null
+    if (twinByCult && !regionsClash(plant.region, twinByCult.region)) {
+      const msgTs = msg.timestamp || 0
+      if (msgTs > (twinByCult._msg_ts || 0)) {
+        await adoptNewerPost(twinByCult, plant, photos, msgUrl, msgMid, msgTs)
+        log(`  🧩 Перезалив с переписанной первой строкой — обновил карточку: ${plant.latin_full} (${twinByCult.garden || 'сад не указан'})`)
+      }
+      continue
+    }
+
     // New plant
     catalog.push(plant)
     byKey.set(key, plant)
+    if (ck && !byCult.has(ck)) byCult.set(ck, plant)
     if (msgUrl) byUrl.set(msgUrl, plant)
     nextId++
     added++
@@ -482,6 +618,7 @@ async function main() {
       }
     }
     if (bestMatch) {
+      if (bestMatch.photos.length > 0) await archiveReplaced(entry, bestMatch.photos)
       entry.max_url = bestMatch.msgUrl
       entry._mid = bestMatch.mid
       entry._msg_ts = bestMatch.msg.timestamp || 0
@@ -502,6 +639,7 @@ async function main() {
   log(`\n📊 Results:`)
   log(`  New plants added: ${added}`)
   log(`  Plants updated: ${updated}`)
+  log(`  Photos moved to growth diary: ${archived}`)
   log(`  Total catalog now: ${catalog.length}`)
 
   if (added > 0 || updated > 0 || cleared > 0) {
