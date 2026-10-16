@@ -457,9 +457,12 @@ async function main() {
       // 2. This message is not older than what's already stored (don't overwrite newer photos)
       const hasLocalPhotos = existingByUrl.photos?.some((p: string) => p.startsWith('photos/'))
       const isOlderThanStored = existingByUrl._msg_ts && msg.timestamp && msg.timestamp < existingByUrl._msg_ts
+      // Тот же самый пост: MAX выдаёт на те же снимки новые ссылки почти каждый
+      // раз, поэтому их просто обновляем. В дневник здесь ничего не уносим —
+      // иначе каждую ночь туда падала бы копия текущих фотографий. Настоящая
+      // замена фото приходит новым постом, её ловит adoptNewerPost.
       const samePhotos = JSON.stringify(existingByUrl.photos) === JSON.stringify(photos)
       if (!hasLocalPhotos && !isOlderThanStored && photos.length > 0 && !samePhotos) {
-        await archiveReplaced(existingByUrl, photos)
         existingByUrl.photos = photos; existingByUrl.thumbs = photos; changed = true
       }
       if (changed) { updated++; log(`  ~ Updated: ${existingByUrl.latin_full}`) }
