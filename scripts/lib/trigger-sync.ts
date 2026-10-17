@@ -58,11 +58,13 @@ function run(log: (m: string) => void) {
   markRun(reasons)
 
   try {
-    const out = openSync(resolve(ROOT, 'logs/sync.log'), 'a')
+    // sync-max сам пишет в logs/sync.log, поэтому его stdout не дублируем —
+    // ловим только то, что упало мимо лога
+    const err = openSync(resolve(ROOT, 'logs/sync-trigger.log'), 'a')
     const proc = spawn('npx', ['tsx', 'scripts/sync-max.ts', '--token', token, '--chat-id', chatId], {
       cwd: ROOT,
       detached: true,
-      stdio: ['ignore', out, out],
+      stdio: ['ignore', 'ignore', err],
       env: { ...process.env, FORCE_COLOR: '0' },
     })
     proc.unref()
