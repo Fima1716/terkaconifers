@@ -24,6 +24,8 @@ module.exports = {
       name: 'terka',
       script: '.output/server/index.mjs',
       cwd: '/var/www/terka',
+      // Упавший процесс перезапускается с растущей паузой, а не сотни раз в секунду
+      exp_backoff_restart_delay: 1000,
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
