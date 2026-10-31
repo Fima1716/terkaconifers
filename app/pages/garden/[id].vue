@@ -62,11 +62,13 @@ const editForm = reactive({
   contacts: '',
   visible: true,
   buyLink: '',
+  location: '',
 })
 
 function startEdit() {
   editForm.description = gardenProfile.value?.description || ''
   editForm.contacts = gardenProfile.value?.contacts || ''
+  editForm.location = gardenProfile.value?.location || ''
   editForm.visible = gardenProfile.value?.visible !== false
   editForm.buyLink = gardenProfile.value?.buyLink || ''
   editing.value = true
@@ -162,9 +164,9 @@ useHead({
                 {{ gardenProfile?.type === 'nursery' ? 'Питомник' : 'Частный сад' }}
               </span>
             </div>
-            <p v-if="stats.region" class="cover-region">
+            <p v-if="gardenProfile?.location || stats.region" class="cover-region">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-              {{ stats.region }}
+              {{ gardenProfile?.location || stats.region }}
             </p>
           </div>
 
@@ -224,6 +226,10 @@ useHead({
         <div class="field">
           <label>Контакты</label>
           <input v-model="editForm.contacts" type="text" placeholder="Telegram, email, etc.">
+        </div>
+        <div class="field">
+          <label>Локация (главнее региона из постов, синхронизация её не меняет)</label>
+          <input v-model="editForm.location" type="text" maxlength="120" placeholder="Западная Сибирь, г. Кемерово">
         </div>
         <div class="field">
           <label>Ссылка «Купить» (появится на всех растениях сада)</label>

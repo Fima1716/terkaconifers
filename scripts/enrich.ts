@@ -5,8 +5,9 @@
  *
  * Run: npx tsx scripts/enrich.ts
  */
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, mkdirSync, existsSync } from 'fs'
 import { resolve } from 'path'
+import { writeFileSync, copyFileSync } from './lib/safe-fs.js'
 import { createHash } from 'crypto'
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -281,6 +282,9 @@ const REGION_RULES: [string, RegExp[]][] = [
   ['ДНР', [/донецк/i, /днр/i]],
   ['Республика Башкортостан', [/башкорт/i, /уфа/i]],
   ['Кировская область', [/киров/i]],
+  ['Кемеровская область', [/кемеров/i, /кузбас/i]],
+  // «Западная Сибирь, Кемерово» раньше падало в общее /сибир/ и становилось Восточной
+  ['Западная Сибирь', [/западн\S*\s+сибир/i]],
   ['Восточная Сибирь', [/сибир/i]],
   ['Алтайский край', [/алтай/i]],
 ]
@@ -326,6 +330,8 @@ const HARDINESS_MAP: Record<string, number> = {
   'Новосибирская область': 2,
   'Омская область': 2,
   'Иркутская область': 2,
+  'Кемеровская область': 2,
+  'Западная Сибирь': 2,
   'Восточная Сибирь': 2,
   'Красноярский край': 2,
   'Алтайский край': 3,
@@ -605,6 +611,31 @@ async function enrich() {
     console.log(`  Persisted ${newlyAssigned} new _site_id values to raw catalog`)
   }
   console.log(`  Assigned ${catalog.length} stable IDs (${newlyAssigned} new)`)
+
+  // ── Локация, заданная вручную в «Настроить сад» ──
+  // Синк берёт регион из каждого поста и перезаписывает его каждую ночь.
+  // Если владелец сада указал локацию сам — она главнее постов. Сырой каталог
+  // не трогаем: очистили поле — снова работают регионы из постов.
+  const gardensPath = resolve(OUT_DIR, 'gardens.json')
+  const gardenLocations = new Map<string, string>()
+  if (existsSync(gardensPath)) {
+    try {
+      const profiles = JSON.parse(readFileSync(gardensPath, 'utf-8')).gardens || {}
+      for (const [name, profile] of Object.entries<any>(profiles)) {
+        const location = String(profile?.location || '').trim()
+        if (location) gardenLocations.set(name, location)
+      }
+    } catch {}
+  }
+  let locationApplied = 0
+  for (const plant of catalog) {
+    const location = gardenLocations.get(parseGarden(normalizeGarden(plant.garden)).display)
+    if (location && plant.region !== location) {
+      plant.region = location
+      locationApplied++
+    }
+  }
+  if (gardenLocations.size) console.log(`  Manual garden locations: ${gardenLocations.size} gardens, ${locationApplied} plants`)
 
   // ── Region auto-correction: fix outliers for named gardens ──
   // For each named garden, if 90%+ entries have one region, override the rest

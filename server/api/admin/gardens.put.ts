@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
+import { spawn } from 'child_process'
 
 export default defineEventHandler(async (event) => {
   const user = await requireAuth(event)
@@ -11,6 +12,8 @@ export default defineEventHandler(async (event) => {
   if (user.role !== 'super_admin' && !user.gardens.includes(gardenId)) {
     throw createError({ statusCode: 403, message: 'Нет прав на этот сад' })
   }
+
+  if (profile.location !== undefined) profile.location = String(profile.location || '').trim().slice(0, 120)
 
   const path = resolve(process.cwd(), 'data/gardens.json')
   let data: any = { gardens: {} }
@@ -31,5 +34,12 @@ export default defineEventHandler(async (event) => {
     title: gardenId,
     changes: diffFields(before, profile, Object.keys(profile || {})),
   })
-  return { ok: true }
+
+  // Локация меняет регион у всех растений сада (её подставляет enrich.ts) —
+  // пересобираем каталог в фоне, не дожидаясь ночного синка
+  const locationChanged = (before.location || '') !== (data.gardens[gardenId].location || '')
+  if (locationChanged) {
+    spawn('npx', ['tsx', 'scripts/enrich.ts'], { cwd: process.cwd(), detached: true, stdio: 'ignore' }).unref()
+  }
+  return { ok: true, rebuilding: locationChanged }
 })
