@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync } from 'fs'
+import { writeFileSync } from './safe-fs.js'
 import { resolve, basename } from 'path'
 import { createHash } from 'crypto'
 

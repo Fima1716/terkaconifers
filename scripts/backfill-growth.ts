@@ -54,7 +54,7 @@ function parsePost(text: string) {
   if (!cultivar) return null  // без сорта карточку не опознать
 
   const hashtags = [...text.matchAll(/#([A-Za-zА-Яа-яЁё0-9_]+)/g)].map(m => m[1])
-  let garden = hashtags.find(h => GARDEN_PREFIXES.some(p => h.startsWith(p)) || h.endsWith('Сад') || h.endsWith('сад')) || ''
+  let garden = hashtags.find(h => GARDEN_PREFIXES.some(p => h.startsWith(p)) || h.endsWith('Сад') || h.endsWith('сад') || /[а-яё]Сад[А-ЯЁ]/.test(h)) || ''
   if (!garden) {
     for (const line of text.split('\n').map(l => l.trim())) {
       if (line.startsWith('#')) continue

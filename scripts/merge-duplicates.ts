@@ -20,7 +20,8 @@
  *   npx tsx scripts/merge-duplicates.ts --dry-run   # только отчёт
  *   npx tsx scripts/merge-duplicates.ts --apply     # склеить
  */
-import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync } from 'fs'
+import { writeFileSync, copyFileSync } from './lib/safe-fs.js'
 import { resolve } from 'path'
 import { execSync } from 'child_process'
 import { archiveOldPhotos } from './lib/growth-archive.js'

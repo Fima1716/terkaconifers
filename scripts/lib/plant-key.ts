@@ -17,6 +17,16 @@ export interface Keyable {
   region?: string
 }
 
+/**
+ * Сорт для сравнения: без кавычек и регистра, а притяжательная «s» у слов
+ * перед последним отброшена. Авторы пишут одно и то же растение то
+ * 'Carsten's Wintergold', то 'Carstens', то 'Carsten' — и получали дубль.
+ */
+function normCultivar(cultivar?: string): string {
+  const words = (cultivar || '').replace(QUOTES, '').replace(/\s+/g, ' ').trim().toLowerCase().split(' ')
+  return words.map((w, i) => (i < words.length - 1 ? w.replace(/s$/, '') : w)).join(' ')
+}
+
 export function normGarden(garden?: string): string {
   return (garden || '').replace(/\s+/g, '').toLowerCase()
 }
@@ -26,7 +36,7 @@ export function normGarden(garden?: string): string {
  * слишком груба — в одном саду могут расти разные экземпляры одного вида.
  */
 export function cultKey(p: Keyable): string {
-  const cult = (p.cultivar || '').replace(QUOTES, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  const cult = normCultivar(p.cultivar)
   if (!cult) return ''
   return `${(p.genus || '').toLowerCase()}|${(p.species || '').toLowerCase()}|${cult}|||${normGarden(p.garden)}`
 }

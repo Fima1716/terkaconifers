@@ -10,10 +10,10 @@
  * Cron (every night at 3:00 MSK):
  *   0 3 * * * cd /path/to/terka && npx tsx scripts/sync-max.ts --token TOKEN --chat-id CHAT_ID >> logs/sync.log 2>&1
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync, appendFileSync } from 'fs'
 import { resolve } from 'path'
 import { execSync } from 'child_process'
-import { copyFileSync } from 'fs'
+import { writeFileSync, copyFileSync } from './lib/safe-fs.js'
 import { archiveOldPhotos } from './lib/growth-archive.js'
 import { cultKey, regionsClash } from './lib/plant-key.js'
 
@@ -161,7 +161,8 @@ function extractPlant(text: string, photos: string[], maxUrl: string, nextId: nu
 
   const hashtags = [...text.matchAll(/#([A-Za-zА-Яа-яЁё0-9_]+)/g)].map(m => m[1])
   const gardenPrefixes = ['Сад', 'Русинов', 'Питомник', 'Коллекция', 'Альпинарий', 'Частный', 'Лес']
-  let garden = hashtags.find(h => gardenPrefixes.some(p => h.startsWith(p)) || h.endsWith('Сад') || h.endsWith('сад')) || ''
+  // «Сад» может стоять и в середине хэштега: #ХюггеСадМарииТарасовой
+  let garden = hashtags.find(h => gardenPrefixes.some(p => h.startsWith(p)) || h.endsWith('Сад') || h.endsWith('сад') || /[а-яё]Сад[А-ЯЁ]/.test(h)) || ''
 
   // Fallback: extract garden from plain text lines (e.g. "Сад Надежды Агуловой")
   if (!garden) {
