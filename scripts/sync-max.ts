@@ -15,7 +15,7 @@ import { resolve } from 'path'
 import { execSync } from 'child_process'
 import { writeFileSync, copyFileSync } from './lib/safe-fs.js'
 import { archiveOldPhotos } from './lib/growth-archive.js'
-import { cultKey, regionsClash } from './lib/plant-key.js'
+import { cultKey, regionsClash, sameGarden } from './lib/plant-key.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const RAW_DIR = resolve(ROOT, 'data/raw')
@@ -501,7 +501,14 @@ async function main() {
     const latinNorm = normKey(plant.latin_full, '').split('|||')[0]
     const allByLatin = [...byKey.entries()].filter(([k]) => k.startsWith(latinNorm + '|||'))
     if (allByLatin.length > 0) {
-      const needsUrl = allByLatin.find(([, v]) => !v.max_url)
+      // Карточка без ссылки на пост (старый импорт из Telegram) ждёт свой пост.
+      // Но только если сад тот же или где-то не указан: раньше сюда цеплялся
+      // пост любого сада с тем же сортом — Hoopsii Екатерины (КЕНарбор) забрал
+      // карточку Портновой вместе с её фото, Haley Bob Алены Свистуновой —
+      // карточку Avalongar_Den.
+      const needsUrl = allByLatin.find(([, v]) => !v.max_url
+        && (!plant.garden || !v.garden || sameGarden(plant.garden, v.garden))
+        && !regionsClash(plant.region, v.region))
       if (needsUrl) {
         const existing = needsUrl[1]
         // Backfill URL, garden, size, age if missing

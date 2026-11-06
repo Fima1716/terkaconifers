@@ -41,6 +41,24 @@ export function cultKey(p: Keyable): string {
   return `${(p.genus || '').toLowerCase()}|${(p.species || '').toLowerCase()}|${cult}|||${normGarden(p.garden)}`
 }
 
+/**
+ * Один и тот же сад, записанный по-разному: «СадОльгиМолчановой» и
+ * «СадМолчановойОльги», «Avalongarden» и «СадAvalongar_Den».
+ * Слова «сад»/«частный» и разделители не в счёт, порядок слов тоже.
+ */
+export function sameGarden(a?: string, b?: string): boolean {
+  const words = (s: string) => s
+    .replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, '$1 $2')
+    .toLowerCase().split(/[^a-zа-яё0-9]+/)
+    .filter(w => w && w !== 'сад' && w !== 'частный')
+  // «ЧастныйсадТатарстан», «русиновсад» — слова слиплись, сравниваем сплошной строкой
+  const squash = (s: string) => s.toLowerCase().replace(/[^a-zа-яё0-9]/g, '').replace(/частный|сад/g, '')
+  const x = words(a || ''), y = words(b || '')
+  if (!x.length || !y.length) return false
+  if (squash(a || '') === squash(b || '')) return true
+  return [...x].sort().join(' ') === [...y].sort().join(' ')
+}
+
 /** Разные регионы — разные растения, даже если сорт и сад совпали */
 export function regionsClash(a?: string, b?: string): boolean {
   const x = (a || '').trim().toLowerCase()
