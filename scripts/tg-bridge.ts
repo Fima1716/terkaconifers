@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
 import { findAllDuplicates, formatDupeWarning, addPublication, parseLatinName, extractGarden } from './lib/dupe-check.js'
+import { pinGarden } from './lib/garden-name.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const STATE_FILE = resolve(ROOT, 'data/tg-bridge-state.json')
@@ -155,13 +156,17 @@ Genus species 'Cultivar'
 
 Название сада:
 - Пиши как есть, БЕЗ префикса "Название сада:"
+- Те же слова в том же порядке, что у автора. Не переставляй и не выбрасывай слова:
+  "Хюгге Сад Марии Тарасовой" — это НЕ "Сад Хюгге Марии Тарасовой" и НЕ "Сад Марии Тарасовой"
 - Если сад не указан — используй имя автора: "Сад Имени Фамилия"
 
 Хештеги (каждый с новой строки):
 1. #Род — #Ель, #Сосна, #Пихта и т.д.
 2. #Род_вид — #Ель_обыкновенная и т.д.
-3. #НазваниеСада — слитно, ОБЯЗАТЕЛЬНО с префиксом (Сад, Питомник и т.д.):
-   ПРАВИЛЬНО: #СадКозловойНатальи, #РусиновСад  НЕПРАВИЛЬНО: #КозловойНатальи (нельзя без "Сад"!)
+3. #НазваниеСада — название сада слитно: те же слова в том же порядке, ничего не добавляй, не убирай и не переставляй:
+   Хюгге Сад Марии Тарасовой → #ХюггеСадМарииТарасовой, Русинов Сад → #РусиновСад
+   Только если в названии нет ни "Сад", ни "Питомник", ни другого такого слова — допиши "Сад" в начало:
+   Козловой Натальи → #СадКозловойНатальи (НЕПРАВИЛЬНО: #КозловойНатальи)
 4. #Российский_сорт — если указано
 
 Очистка: удали 👤, (#IDxxxx), @username, метки бота.
@@ -173,7 +178,11 @@ Genus species 'Cultivar'
     })
     if (!resp.ok) { log(`AI error: ${resp.status}`); return null }
     const data: any = await resp.json()
-    return data.choices?.[0]?.message?.content?.trim() || null
+    const text = data.choices?.[0]?.message?.content?.trim()
+    if (!text) return null
+    const pinned = pinGarden(rawText, text)
+    if (pinned !== text) log(`AI исказила название сада — вернул как в заявке`)
+    return pinned
   } catch (e) { log(`AI error: ${e}`); return null }
 }
 
