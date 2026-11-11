@@ -163,4 +163,23 @@ if [ -f "$sync_log" ]; then
   fi
 fi
 
+# ── 5. Сайт курса school.rusinovsad.ru ───────────────────────────
+# Живёт на этой же машине своим systemd-юнитом school и своей базой в
+# PostgreSQL. /api/health отвечает ok:true, только если база доступна.
+if systemctl list-unit-files school.service >/dev/null 2>&1; then
+  school_ok() { curl -s -m 15 http://127.0.0.1:3010/api/health | grep -q '"ok":true'; }
+  if ! school_ok; then
+    systemctl is-active -q postgresql || systemctl restart postgresql
+    systemctl restart school
+    sleep 15
+    if school_ok; then
+      notify "сайт курса school.rusinovsad.ru не отвечал — перезапустил, заработал"
+    else
+      alert school "сайт курса school.rusinovsad.ru не отвечает даже после перезапуска. Смотреть: journalctl -u school -n 50"
+    fi
+  else
+    resolved school "сайт курса school.rusinovsad.ru снова отвечает"
+  fi
+fi
+
 exit 0
