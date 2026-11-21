@@ -2,10 +2,23 @@ import { readFileSync, existsSync, statSync } from 'fs'
 import { resolve } from 'path'
 import { createHmac, timingSafeEqual } from 'crypto'
 
-const SHARED_SECRET = process.env.PRIVOY_SHARED_SECRET || ''
+function loadSecret(): string {
+  if (process.env.PRIVOY_SHARED_SECRET) return process.env.PRIVOY_SHARED_SECRET
+  const envPath = resolve(process.cwd(), '.env')
+  if (!existsSync(envPath)) return ''
+  const m = readFileSync(envPath, 'utf-8').match(/^PRIVOY_SHARED_SECRET=(.+)$/m)
+  return m ? m[1].trim() : ''
+}
+
+let _secret: string | null = null
+function getSecret(): string {
+  if (_secret === null) _secret = loadSecret()
+  return _secret
+}
 const MAX_DRIFT_MS = 60_000
 
 function verifyHmac(event: any): boolean {
+  const SHARED_SECRET = getSecret()
   if (!SHARED_SECRET) return false
   const ts = getHeader(event, 'x-privoy-ts')
   const sig = getHeader(event, 'x-privoy-sig')
@@ -35,7 +48,7 @@ function loadCatalog(): any[] {
 }
 
 export default defineEventHandler((event) => {
-  if (!SHARED_SECRET) throw createError({ statusCode: 503, message: 'not configured' })
+  if (!getSecret()) throw createError({ statusCode: 503, message: 'not configured' })
   if (!verifyHmac(event)) throw createError({ statusCode: 403, message: 'forbidden' })
 
   const q = getQuery(event)
